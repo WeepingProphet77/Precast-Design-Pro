@@ -39,14 +39,32 @@ export interface ConnectionNode {
   forces: ConnectionForces;
 }
 
+export interface Vertex {
+  id: string;
+  x: number;
+  y: number;
+  radius?: number; // Fillet radius in inches
+}
+
+export interface Opening {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  type: "rect" | "circle";
+}
+
 export interface Panel {
   id: string;
   name: string; // e.g., "P-1"
   description?: string;
-  width: number; // inches
+  width: number; // inches (Bounding box or initial)
   height: number; // inches
   thickness: number; // inches
   weight?: number; // lbs
+  perimeter: Vertex[];
+  openings: Opening[];
   connections: ConnectionNode[];
 }
 
@@ -88,6 +106,13 @@ export const createDefaultProject = (): ProjectData => ({
       width: 120,
       height: 180,
       thickness: 6,
+      perimeter: [
+        { id: "v1", x: 0, y: 0 },
+        { id: "v2", x: 120, y: 0 },
+        { id: "v3", x: 120, y: 180 },
+        { id: "v4", x: 0, y: 180 },
+      ],
+      openings: [],
       connections: [
         {
           id: "c1",
