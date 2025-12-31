@@ -79,9 +79,9 @@ export default function PanelDesigner() {
   const [tool, setTool] = useState<"select" | "vertex" | "rect_opening" | "circle_opening" | "connection" | "sketch_line">("select");
   const [isDragging, setIsDragging] = useState(false);
   
-  // Sketching State
-  const [isDrawingLine, setIsDrawingLine] = useState(false);
-  const [currentLineStart, setCurrentLineStart] = useState<{x: number, y: number} | null>(null);
+  // Drawing State (Click-Move-Click)
+  const [drawingStep, setDrawingStep] = useState<0 | 1>(0);
+  const [drawingStartPos, setDrawingStartPos] = useState<{x: number, y: number} | null>(null);
   const [currentMousePos, setCurrentMousePos] = useState<{x: number, y: number} | null>(null);
 
   // Sync active panel state
@@ -90,6 +90,12 @@ export default function PanelDesigner() {
     if (p) setActivePanel(p);
     else if (project.panels.length > 0) setActivePanelId(project.panels[0].id);
   }, [project.panels, activePanelId]);
+
+  // Reset drawing state when tool changes
+  useEffect(() => {
+    setDrawingStep(0);
+    setDrawingStartPos(null);
+  }, [tool]);
 
   if (!activePanel) return <div className="p-8">Loading...</div>;
 
@@ -107,35 +113,7 @@ export default function PanelDesigner() {
     updatePanel({ ...activePanel, perimeter: p, width, height });
   };
 
-  const addOpening = (type: "rect" | "circle") => {
-    const newOpening: Opening = {
-      id: crypto.randomUUID(),
-      type,
-      x: 24,
-      y: 24,
-      width: 24,
-      height: 24
-    };
-    updatePanel({ ...activePanel, openings: [...activePanel.openings, newOpening] });
-    setSelectedOpeningId(newOpening.id);
-    setTool("select");
-  };
-
-  const handleStageMouseDown = (e: any) => {
-      const stage = e.target.getStage();
-      const pos = stage.getPointerPosition();
-      const x = Math.round((pos.x - canvasPadding) / scale);
-      const y = Math.round((pos.y - canvasPadding) / scale);
-
-      if (tool === "sketch_line") {
-          setIsDrawingLine(true);
-          setCurrentLineStart({ x, y });
-          setCurrentMousePos({ x, y });
-      }
-  };
-
   const handleStageMouseMove = (e: any) => {
-      if (!isDrawingLine) return;
       const stage = e.target.getStage();
       const pos = stage.getPointerPosition();
       const x = Math.round((pos.x - canvasPadding) / scale);
@@ -143,41 +121,25 @@ export default function PanelDesigner() {
       setCurrentMousePos({ x, y });
   };
 
-  const handleStageMouseUp = (e: any) => {
-      if (isDrawingLine && currentLineStart && currentMousePos) {
-          const newLine: SketchLine = {
-              id: crypto.randomUUID(),
-              x1: currentLineStart.x,
-              y1: currentLineStart.y,
-              x2: currentMousePos.x,
-              y2: currentMousePos.y
-          };
-          updatePanel({
-              ...activePanel,
-              sketchLines: [...(activePanel.sketchLines || []), newLine]
-          });
-          setIsDrawingLine(false);
-          setCurrentLineStart(null);
-          setCurrentMousePos(null);
-      }
-  };
-
   const handleStageClick = (e: any) => {
     const clickedOnEmpty = e.target === e.target.getStage();
-    if (clickedOnEmpty) {
-      setSelectedConnectionId(null);
-      setSelectedVertexId(null);
-      setSelectedEdgeIndex(null);
-      setSelectedOpeningId(null);
-      setSelectedSketchLineId(null);
-      
-      if (tool === "connection") {
-        // Add connection at clicked pos
-        const pos = e.target.getStage().getPointerPosition();
+    
+    // Select Tool Logic
+    if (tool === "select") {
+        if (clickedOnEmpty) {
+            setSelectedConnectionId(null);
+            setSelectedVertexId(null);
+            setSelectedEdgeIndex(null);
+            setSelectedOpeningId(null);
+            setSelectedSketchLineId(null);
+        }
+        return;
+    }
+
+    // Connection Tool Logic (Simple Click)
+    if (tool === "connection") {
         const stage = e.target.getStage();
-        
-        // We use manual scale prop on shapes, not stage
-        // Local x = (stageX - groupX) / scale
+        const pos = stage.getPointerPosition();
         const x = Math.round((pos.x - canvasPadding) / scale);
         const y = Math.round((pos.y - canvasPadding) / scale);
         
@@ -192,7 +154,74 @@ export default function PanelDesigner() {
         });
         setSelectedConnectionId(id);
         setTool("select");
-      }
+        return;
+    }
+
+    // Drawing Tools (Rect, Circle, Line) - Click-Move-Click
+    if (tool === "rect_opening" || tool === "circle_opening" || tool === "sketch_line") {
+        const stage = e.target.getStage();
+        const pos = stage.getPointerPosition();
+        const x = Math.round((pos.x - canvasPadding) / scale);
+        const y = Math.round((pos.y - canvasPadding) / scale);
+
+        if (drawingStep === 0) {
+            // Start Drawing
+            setDrawingStep(1);
+            setDrawingStartPos({ x, y });
+        } else {
+            // Finish Drawing
+            if (!drawingStartPos) return;
+
+            if (tool === "rect_opening") {
+                 const minX = Math.min(drawingStartPos.x, x);
+                 const minY = Math.min(drawingStartPos.y, y);
+                 const width = Math.abs(x - drawingStartPos.x);
+                 const height = Math.abs(y - drawingStartPos.y);
+                 
+                 if (width > 0 && height > 0) {
+                     const newOpening: Opening = {
+                        id: crypto.randomUUID(),
+                        type: "rect",
+                        x: minX,
+                        y: minY,
+                        width,
+                        height
+                     };
+                     updatePanel({ ...activePanel, openings: [...activePanel.openings, newOpening] });
+                 }
+            } else if (tool === "circle_opening") {
+                 const dx = x - drawingStartPos.x;
+                 const dy = y - drawingStartPos.y;
+                 const radius = Math.sqrt(dx*dx + dy*dy);
+                 const diameter = radius * 2;
+                 
+                 if (radius > 0) {
+                     const newOpening: Opening = {
+                        id: crypto.randomUUID(),
+                        type: "circle",
+                        x: drawingStartPos.x - radius,
+                        y: drawingStartPos.y - radius,
+                        width: diameter,
+                        height: diameter
+                     };
+                     updatePanel({ ...activePanel, openings: [...activePanel.openings, newOpening] });
+                 }
+            } else if (tool === "sketch_line") {
+                 const newLine: SketchLine = {
+                    id: crypto.randomUUID(),
+                    x1: drawingStartPos.x,
+                    y1: drawingStartPos.y,
+                    x2: x,
+                    y2: y
+                 };
+                 updatePanel({ ...activePanel, sketchLines: [...(activePanel.sketchLines || []), newLine] });
+            }
+            
+            // Reset and stay in tool (AutoCAD style continuous command) or switch to select?
+            // Usually stay in tool.
+            setDrawingStep(0);
+            setDrawingStartPos(null);
+        }
     }
   };
 
@@ -222,6 +251,12 @@ export default function PanelDesigner() {
                  <ToggleGroupItem value="sketch_line" aria-label="Sketch Line" title="Sketch Dimension Line">
                     <Ruler className="w-4 h-4" />
                 </ToggleGroupItem>
+                <ToggleGroupItem value="rect_opening" aria-label="Draw Rectangle" title="Draw Rectangular Opening">
+                    <Square className="w-4 h-4" />
+                </ToggleGroupItem>
+                <ToggleGroupItem value="circle_opening" aria-label="Draw Circle" title="Draw Round Opening">
+                    <CircleIcon className="w-4 h-4" />
+                </ToggleGroupItem>
                 <ToggleGroupItem value="connection" aria-label="Add Connection" title="Add Connection">
                     <BoxSelect className="w-4 h-4" />
                 </ToggleGroupItem>
@@ -248,13 +283,6 @@ export default function PanelDesigner() {
                         updatePanel({ ...activePanel, width: w, height: h, perimeter: newPerimeter });
                     }}
                 />
-                <Separator orientation="vertical" className="h-8 mx-1" />
-                <Button variant="outline" size="icon" className="h-9 w-9" onClick={() => addOpening("rect")} title="Add Rect Opening">
-                    <Square className="w-4 h-4" />
-                </Button>
-                <Button variant="outline" size="icon" className="h-9 w-9" onClick={() => addOpening("circle")} title="Add Round Opening">
-                    <CircleIcon className="w-4 h-4" />
-                </Button>
             </div>
         </div>
 
@@ -304,9 +332,7 @@ export default function PanelDesigner() {
                     width={activePanel.width * scale + canvasPadding * 2} 
                     height={activePanel.height * scale + canvasPadding * 2}
                     onClick={handleStageClick}
-                    onMouseDown={handleStageMouseDown}
                     onMouseMove={handleStageMouseMove}
-                    onMouseUp={handleStageMouseUp}
                  >
                     <Layer>
                         <Group x={canvasPadding} y={canvasPadding}>
@@ -399,23 +425,85 @@ export default function PanelDesigner() {
                                 );
                             })}
                             
-                            {/* Temporary Drawing Line */}
-                            {isDrawingLine && currentLineStart && currentMousePos && (
+                            {/* Ghost Drawing Shapes */}
+                            {drawingStep === 1 && drawingStartPos && currentMousePos && (
                                 <Group>
-                                    <Line
-                                        points={[currentLineStart.x * scale, currentLineStart.y * scale, currentMousePos.x * scale, currentMousePos.y * scale]}
-                                        stroke="#E74C3C"
-                                        strokeWidth={2}
-                                        dash={[5, 5]}
-                                    />
-                                     <Text
-                                        x={currentMousePos.x * scale + 10}
-                                        y={currentMousePos.y * scale + 10}
-                                        text={`${Math.sqrt(Math.pow(currentMousePos.x - currentLineStart.x, 2) + Math.pow(currentMousePos.y - currentLineStart.y, 2)).toFixed(1)}"`}
-                                        fontSize={12}
-                                        fontFamily="Roboto Mono"
-                                        fill="#E74C3C"
-                                    />
+                                    {tool === "rect_opening" && (
+                                        <Group>
+                                            <Rect
+                                                x={Math.min(drawingStartPos.x, currentMousePos.x) * scale}
+                                                y={Math.min(drawingStartPos.y, currentMousePos.y) * scale}
+                                                width={Math.abs(currentMousePos.x - drawingStartPos.x) * scale}
+                                                height={Math.abs(currentMousePos.y - drawingStartPos.y) * scale}
+                                                stroke="#3498DB"
+                                                strokeWidth={1}
+                                                dash={[5, 5]}
+                                                fill="rgba(52, 152, 219, 0.2)"
+                                            />
+                                            {/* Dimensions */}
+                                            <Text
+                                                x={Math.min(drawingStartPos.x, currentMousePos.x) * scale}
+                                                y={Math.min(drawingStartPos.y, currentMousePos.y) * scale - 20}
+                                                text={`${Math.abs(currentMousePos.x - drawingStartPos.x).toFixed(1)}" x ${Math.abs(currentMousePos.y - drawingStartPos.y).toFixed(1)}"`}
+                                                fontSize={12}
+                                                fill="#3498DB"
+                                            />
+                                        </Group>
+                                    )}
+                                    {tool === "circle_opening" && (
+                                        <Group>
+                                            {/* Center Marker */}
+                                            <Circle
+                                                x={drawingStartPos.x * scale}
+                                                y={drawingStartPos.y * scale}
+                                                radius={3}
+                                                fill="#3498DB"
+                                            />
+                                            {/* The Circle being drawn */}
+                                            <Circle
+                                                x={drawingStartPos.x * scale}
+                                                y={drawingStartPos.y * scale}
+                                                radius={Math.sqrt(Math.pow(currentMousePos.x - drawingStartPos.x, 2) + Math.pow(currentMousePos.y - drawingStartPos.y, 2)) * scale}
+                                                stroke="#3498DB"
+                                                strokeWidth={1}
+                                                dash={[5, 5]}
+                                                fill="rgba(52, 152, 219, 0.2)"
+                                            />
+                                            {/* Radius Line */}
+                                            <Line 
+                                                points={[drawingStartPos.x * scale, drawingStartPos.y * scale, currentMousePos.x * scale, currentMousePos.y * scale]}
+                                                stroke="#3498DB"
+                                                strokeWidth={1}
+                                                dash={[2, 2]}
+                                            />
+                                            {/* Radius Text */}
+                                            <Text 
+                                                x={currentMousePos.x * scale + 10}
+                                                y={currentMousePos.y * scale}
+                                                text={`R: ${Math.sqrt(Math.pow(currentMousePos.x - drawingStartPos.x, 2) + Math.pow(currentMousePos.y - drawingStartPos.y, 2)).toFixed(1)}"`}
+                                                fontSize={12}
+                                                fill="#3498DB"
+                                            />
+                                        </Group>
+                                    )}
+                                    {tool === "sketch_line" && (
+                                        <Group>
+                                            <Line
+                                                points={[drawingStartPos.x * scale, drawingStartPos.y * scale, currentMousePos.x * scale, currentMousePos.y * scale]}
+                                                stroke="#E74C3C"
+                                                strokeWidth={2}
+                                                dash={[5, 5]}
+                                            />
+                                             <Text
+                                                x={currentMousePos.x * scale + 10}
+                                                y={currentMousePos.y * scale + 10}
+                                                text={`${Math.sqrt(Math.pow(currentMousePos.x - drawingStartPos.x, 2) + Math.pow(currentMousePos.y - drawingStartPos.y, 2)).toFixed(1)}"`}
+                                                fontSize={12}
+                                                fontFamily="Roboto Mono"
+                                                fill="#E74C3C"
+                                            />
+                                        </Group>
+                                    )}
                                 </Group>
                             )}
 
