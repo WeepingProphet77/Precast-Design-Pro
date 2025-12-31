@@ -84,6 +84,47 @@ export default function PanelDesigner() {
   const [drawingStartPos, setDrawingStartPos] = useState<{x: number, y: number} | null>(null);
   const [currentMousePos, setCurrentMousePos] = useState<{x: number, y: number} | null>(null);
 
+  // Keyboard Navigation
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (tool !== "select" || !activePanel) return;
+      
+      const isArrowKey = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key);
+      if (!isArrowKey) return;
+
+      e.preventDefault();
+      
+      const step = e.shiftKey ? 5 : 1; // 5 inches if shift, 1 inch otherwise
+      let dx = 0;
+      let dy = 0;
+
+      if (e.key === "ArrowUp") dy = -step;
+      if (e.key === "ArrowDown") dy = step;
+      if (e.key === "ArrowLeft") dx = -step;
+      if (e.key === "ArrowRight") dx = step;
+
+      if (selectedOpeningId) {
+        const newOps = activePanel.openings.map(op => 
+          op.id === selectedOpeningId ? { ...op, x: op.x + dx, y: op.y + dy } : op
+        );
+        updatePanel({ ...activePanel, openings: newOps });
+      } else if (selectedConnectionId) {
+        const conn = activePanel.connections.find(c => c.id === selectedConnectionId);
+        if (conn) {
+          updateConnection(activePanel.id, { ...conn, x: conn.x + dx, y: conn.y + dy });
+        }
+      } else if (selectedVertexId) {
+        const newPerimeter = activePanel.perimeter.map(v => 
+          v.id === selectedVertexId ? { ...v, x: v.x + dx, y: v.y + dy } : v
+        );
+        updatePanel({ ...activePanel, perimeter: newPerimeter });
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [tool, selectedOpeningId, selectedConnectionId, selectedVertexId, activePanel, updatePanel, updateConnection]);
+
   // Sync active panel state
   useEffect(() => {
     const p = project.panels.find(p => p.id === activePanelId);
