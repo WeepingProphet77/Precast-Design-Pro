@@ -62,6 +62,8 @@ const getAdvancedPath = (vertices: Vertex[]) => {
   return d;
 }
 
+import { ResizePanelDialog } from "@/components/ResizePanelDialog";
+
 export default function PanelDesigner() {
   const { project, updatePanel, addPanel, deletePanel, updateConnection, addConnection, deleteConnection } = useProject();
   const [activePanelId, setActivePanelId] = useState<string>(project.panels[0]?.id || "");
@@ -69,6 +71,7 @@ export default function PanelDesigner() {
   
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
   const [selectedVertexId, setSelectedVertexId] = useState<string | null>(null);
+  const [selectedEdgeIndex, setSelectedEdgeIndex] = useState<number | null>(null);
   const [selectedOpeningId, setSelectedOpeningId] = useState<string | null>(null);
   const [selectedSketchLineId, setSelectedSketchLineId] = useState<string | null>(null);
   
@@ -164,6 +167,7 @@ export default function PanelDesigner() {
     if (clickedOnEmpty) {
       setSelectedConnectionId(null);
       setSelectedVertexId(null);
+      setSelectedEdgeIndex(null);
       setSelectedOpeningId(null);
       setSelectedSketchLineId(null);
       
@@ -226,6 +230,25 @@ export default function PanelDesigner() {
             <Separator orientation="vertical" className="h-8" />
             
             <div className="flex gap-1">
+                <ResizePanelDialog 
+                    panel={activePanel} 
+                    trigger={
+                        <Button variant="outline" size="sm" className="h-9 px-3 gap-2" title="Resize Panel Box">
+                           <BoxSelect className="w-4 h-4" /> Resize
+                        </Button>
+                    }
+                    onResize={(w, h) => {
+                        // Reset to rectangle of size w/h
+                        const newPerimeter: Vertex[] = [
+                            { id: crypto.randomUUID(), x: 0, y: 0 },
+                            { id: crypto.randomUUID(), x: w, y: 0 },
+                            { id: crypto.randomUUID(), x: w, y: h },
+                            { id: crypto.randomUUID(), x: 0, y: h },
+                        ];
+                        updatePanel({ ...activePanel, width: w, height: h, perimeter: newPerimeter });
+                    }}
+                />
+                <Separator orientation="vertical" className="h-8 mx-1" />
                 <Button variant="outline" size="icon" className="h-9 w-9" onClick={() => addOpening("rect")} title="Add Rect Opening">
                     <Square className="w-4 h-4" />
                 </Button>
@@ -271,6 +294,36 @@ export default function PanelDesigner() {
                                 strokeWidth={2 / scale} // visual constant width
                                 lineJoin="round"
                             />
+
+                            {/* Panel Shape Edges (for selection) */}
+                            {tool === "select" && activePanel.perimeter.map((v, i) => {
+                                const nextV = activePanel.perimeter[(i + 1) % activePanel.perimeter.length];
+                                return (
+                                    <Line
+                                        key={`edge-${i}`}
+                                        points={[v.x * scale, v.y * scale, nextV.x * scale, nextV.y * scale]}
+                                        stroke={selectedEdgeIndex === i ? "#E74C3C" : "transparent"}
+                                        strokeWidth={selectedEdgeIndex === i ? 4 : 10}
+                                        opacity={selectedEdgeIndex === i ? 0.8 : 0}
+                                        onMouseEnter={(e) => {
+                                            const container = e.target.getStage()?.container();
+                                            if (container) container.style.cursor = "pointer";
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            const container = e.target.getStage()?.container();
+                                            if (container) container.style.cursor = "default";
+                                        }}
+                                        onClick={(e) => {
+                                            e.cancelBubble = true;
+                                            setSelectedEdgeIndex(i);
+                                            setSelectedVertexId(null);
+                                            setSelectedConnectionId(null);
+                                            setSelectedOpeningId(null);
+                                            setSelectedSketchLineId(null);
+                                        }}
+                                    />
+                                );
+                            })}
 
                             {/* Sketch Lines */}
                             {(activePanel.sketchLines || []).map((line) => {
@@ -359,6 +412,8 @@ export default function PanelDesigner() {
                                         setSelectedOpeningId(op.id);
                                         setSelectedConnectionId(null);
                                         setSelectedSketchLineId(null);
+                                        setSelectedEdgeIndex(null);
+                                        setSelectedVertexId(null);
                                     }}
                                 >
                                     {op.type === "rect" ? (
@@ -408,6 +463,7 @@ export default function PanelDesigner() {
                                         setSelectedOpeningId(null);
                                         setSelectedVertexId(null);
                                         setSelectedSketchLineId(null);
+                                        setSelectedEdgeIndex(null);
                                     }}
                                 >
                                     <Circle 
@@ -620,6 +676,75 @@ export default function PanelDesigner() {
                                  </div>
                              </div>
                          )
+                    })()}
+                </div>
+             ) : selectedEdgeIndex !== null ? (
+                <div className="p-4">
+                    <h3 className="font-bold text-lg mb-4">Edge Properties</h3>
+                    {(() => {
+                        const idx = selectedEdgeIndex;
+                        const v1 = activePanel.perimeter[idx];
+                        const v2 = activePanel.perimeter[(idx + 1) % activePanel.perimeter.length];
+                        
+                        const dx = v2.x - v1.x;
+                        const dy = v2.y - v1.y;
+                        const length = Math.sqrt(dx * dx + dy * dy);
+                        const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+                        
+                        return (
+                            <div className="space-y-4">
+                                <div className="p-4 bg-muted/20 rounded border">
+                                    <div className="text-xs text-muted-foreground uppercase font-bold mb-1">Length</div>
+                                    <div className="text-2xl font-mono">{length.toFixed(2)}"</div>
+                                </div>
+                                
+                                <div className="grid grid-cols-2 gap-4">
+                                   <div>
+                                       <Label>New Length</Label>
+                                       <Input 
+                                            type="number" 
+                                            defaultValue={length.toFixed(2)}
+                                            onBlur={(e) => {
+                                                const newLen = Number(e.target.value);
+                                                if (newLen <= 0 || isNaN(newLen)) return;
+                                                
+                                                // Adjust v2 to be at new length from v1 along the same vector
+                                                const currentAngleRad = Math.atan2(dy, dx);
+                                                const newX = v1.x + newLen * Math.cos(currentAngleRad);
+                                                const newY = v1.y + newLen * Math.sin(currentAngleRad);
+                                                
+                                                const newPerimeter = [...activePanel.perimeter];
+                                                newPerimeter[(idx + 1) % activePanel.perimeter.length] = { ...v2, x: newX, y: newY };
+                                                updatePanel({ ...activePanel, perimeter: newPerimeter });
+                                            }}
+                                       />
+                                   </div>
+                                    <div>
+                                       <Label>Angle (deg)</Label>
+                                       <Input 
+                                            type="number" 
+                                            defaultValue={angle.toFixed(1)}
+                                            onBlur={(e) => {
+                                                const newAngle = Number(e.target.value);
+                                                if (isNaN(newAngle)) return;
+                                                
+                                                const newAngleRad = newAngle * Math.PI / 180;
+                                                const newX = v1.x + length * Math.cos(newAngleRad);
+                                                const newY = v1.y + length * Math.sin(newAngleRad);
+                                                
+                                                const newPerimeter = [...activePanel.perimeter];
+                                                newPerimeter[(idx + 1) % activePanel.perimeter.length] = { ...v2, x: newX, y: newY };
+                                                updatePanel({ ...activePanel, perimeter: newPerimeter });
+                                            }}
+                                       />
+                                   </div>
+                                </div>
+                                
+                                <p className="text-xs text-muted-foreground mt-4">
+                                    Editing length or angle will move the end vertex of the selected edge.
+                                </p>
+                            </div>
+                        );
                     })()}
                 </div>
              ) : selectedSketchLineId ? (
