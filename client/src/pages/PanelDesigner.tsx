@@ -12,7 +12,7 @@ import { calculateLoadCombinations } from "@/lib/calculations";
 import { 
   Plus, Trash2, ZoomIn, ZoomOut, MousePointer2, PenTool, 
   Square, Circle as CircleIcon, CornerUpLeft, GripHorizontal,
-  BoxSelect, Move, Ruler
+  BoxSelect, Move, Ruler, Maximize
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -260,12 +260,28 @@ export default function PanelDesigner() {
 
         <div className="flex items-center gap-4">
             <div className="flex items-center gap-1 bg-muted rounded-md p-1">
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setScale(Math.max(1, scale - 0.5))}>
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setScale(Math.max(0.5, scale - 0.5))} title="Zoom Out">
                     <ZoomOut className="w-3 h-3" />
                 </Button>
-                <span className="text-xs font-mono min-w-[30px] text-center">{Math.round(scale * 100 / 3)}%</span>
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setScale(Math.min(6, scale + 0.5))}>
+                <Button variant="ghost" className="h-7 px-2 text-xs font-mono min-w-[50px] text-center" onClick={() => setScale(3)} title="Reset Zoom">
+                    {Math.round(scale * 100 / 3)}%
+                </Button>
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setScale(Math.min(10, scale + 0.5))} title="Zoom In">
                     <ZoomIn className="w-3 h-3" />
+                </Button>
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => {
+                    // Calculate scale to fit panel in viewport (approx)
+                    // Viewport width ~ screen width - 400 (sidebar) - padding
+                    // Height ~ screen height - header - toolbar - padding
+                    // This is rough estimation as we don't measure DOM
+                    const viewportWidth = window.innerWidth - 700; 
+                    const viewportHeight = window.innerHeight - 200;
+                    const scaleX = viewportWidth / activePanel.width;
+                    const scaleY = viewportHeight / activePanel.height;
+                    const fitScale = Math.min(scaleX, scaleY) * 0.8; // 80% fit
+                    setScale(Math.max(0.5, fitScale));
+                }} title="Zoom to Fit">
+                    <Maximize className="w-3 h-3" />
                 </Button>
             </div>
         </div>
@@ -274,7 +290,16 @@ export default function PanelDesigner() {
       <div className="flex flex-1 overflow-hidden">
         {/* Canvas Area */}
         <div className="flex-1 bg-slate-100/50 relative overflow-auto grid-bg flex items-center justify-center p-8">
-             <div className="shadow-xl bg-white relative ring-1 ring-black/5">
+             <div 
+                className="shadow-xl bg-white relative ring-1 ring-black/5"
+                onWheel={(e) => {
+                    if (e.ctrlKey || e.metaKey) {
+                        e.preventDefault();
+                        const delta = e.deltaY > 0 ? -0.2 : 0.2;
+                        setScale(s => Math.max(0.2, Math.min(10, s + delta)));
+                    }
+                }}
+             >
                  <Stage 
                     width={activePanel.width * scale + canvasPadding * 2} 
                     height={activePanel.height * scale + canvasPadding * 2}
