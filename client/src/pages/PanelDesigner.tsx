@@ -552,6 +552,24 @@ export default function PanelDesigner() {
                                          <Input type="number" value={v.y} onChange={e => handleVertexDrag(v.id, v.x, Number(e.target.value))} />
                                      </div>
                                  </div>
+                                 
+                                 <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                         <Label>Move X (+/-)</Label>
+                                         <div className="flex gap-1">
+                                            <Button variant="outline" size="sm" className="h-8 px-2 flex-1" onClick={() => handleVertexDrag(v.id, v.x - 1, v.y)}>-1"</Button>
+                                            <Button variant="outline" size="sm" className="h-8 px-2 flex-1" onClick={() => handleVertexDrag(v.id, v.x + 1, v.y)}>+1"</Button>
+                                         </div>
+                                    </div>
+                                    <div>
+                                         <Label>Move Y (+/-)</Label>
+                                         <div className="flex gap-1">
+                                            <Button variant="outline" size="sm" className="h-8 px-2 flex-1" onClick={() => handleVertexDrag(v.id, v.x, v.y - 1)}>-1"</Button>
+                                            <Button variant="outline" size="sm" className="h-8 px-2 flex-1" onClick={() => handleVertexDrag(v.id, v.x, v.y + 1)}>+1"</Button>
+                                         </div>
+                                    </div>
+                                 </div>
+
                                  <div>
                                      <Label>Corner Radius (Fillet)</Label>
                                      <Input 
@@ -567,6 +585,39 @@ export default function PanelDesigner() {
                                         Enter a value greater than 0 to create a rounded corner.
                                     </p>
                                  </div>
+                                 
+                                 <Separator />
+                                 
+                                 <div className="grid grid-cols-2 gap-2">
+                                     <Button size="sm" variant="secondary" onClick={() => {
+                                         // Add vertex after this one (split edge)
+                                         const idx = activePanel.perimeter.findIndex(vert => vert.id === v.id);
+                                         if (idx === -1) return;
+                                         
+                                         const nextIdx = (idx + 1) % activePanel.perimeter.length;
+                                         const nextV = activePanel.perimeter[nextIdx];
+                                         
+                                         const newV: Vertex = {
+                                             id: crypto.randomUUID(),
+                                             x: (v.x + nextV.x) / 2,
+                                             y: (v.y + nextV.y) / 2,
+                                         };
+                                         
+                                         const newPerimeter = [...activePanel.perimeter];
+                                         newPerimeter.splice(idx + 1, 0, newV);
+                                         updatePanel({ ...activePanel, perimeter: newPerimeter });
+                                         setSelectedVertexId(newV.id);
+                                     }}>
+                                         <Plus className="w-3 h-3 mr-2" /> Split Edge
+                                     </Button>
+                                     <Button size="sm" variant="destructive" disabled={activePanel.perimeter.length <= 3} onClick={() => {
+                                         const newPerimeter = activePanel.perimeter.filter(vert => vert.id !== v.id);
+                                         updatePanel({ ...activePanel, perimeter: newPerimeter });
+                                         setSelectedVertexId(null);
+                                     }}>
+                                         <Trash2 className="w-3 h-3 mr-2" /> Delete
+                                     </Button>
+                                 </div>
                              </div>
                          )
                     })()}
@@ -577,13 +628,84 @@ export default function PanelDesigner() {
                    {(() => {
                        const line = (activePanel.sketchLines || []).find(l => l.id === selectedSketchLineId);
                        if (!line) return null;
-                       const length = Math.sqrt(Math.pow(line.x2 - line.x1, 2) + Math.pow(line.y2 - line.y1, 2)).toFixed(2);
+                       const length = Math.sqrt(Math.pow(line.x2 - line.x1, 2) + Math.pow(line.y2 - line.y1, 2));
                        return (
                            <div className="space-y-4">
-                               <div className="p-4 bg-muted/20 rounded border">
-                                   <div className="text-xs text-muted-foreground uppercase font-bold mb-1">Length</div>
-                                   <div className="text-2xl font-mono">{length}"</div>
+                               <div className="grid grid-cols-2 gap-4">
+                                   <div>
+                                       <Label>Length (in)</Label>
+                                       <Input 
+                                            type="number" 
+                                            value={length.toFixed(2)} 
+                                            onChange={(e) => {
+                                                const newLen = Number(e.target.value);
+                                                // Adjust x2/y2 to match new length while preserving angle
+                                                const currentAngle = Math.atan2(line.y2 - line.y1, line.x2 - line.x1);
+                                                const newX2 = line.x1 + newLen * Math.cos(currentAngle);
+                                                const newY2 = line.y1 + newLen * Math.sin(currentAngle);
+                                                
+                                                const newLines = (activePanel.sketchLines || []).map(l => 
+                                                    l.id === line.id ? { ...l, x2: newX2, y2: newY2 } : l
+                                                );
+                                                updatePanel({ ...activePanel, sketchLines: newLines });
+                                            }}
+                                       />
+                                   </div>
+                                    <div>
+                                       <Label>Angle (deg)</Label>
+                                       <Input 
+                                            type="number" 
+                                            value={(Math.atan2(line.y2 - line.y1, line.x2 - line.x1) * 180 / Math.PI).toFixed(1)}
+                                            onChange={(e) => {
+                                                const newAngleRad = Number(e.target.value) * Math.PI / 180;
+                                                // Adjust x2/y2 to match new angle while preserving length
+                                                const newX2 = line.x1 + length * Math.cos(newAngleRad);
+                                                const newY2 = line.y1 + length * Math.sin(newAngleRad);
+                                                
+                                                const newLines = (activePanel.sketchLines || []).map(l => 
+                                                    l.id === line.id ? { ...l, x2: newX2, y2: newY2 } : l
+                                                );
+                                                updatePanel({ ...activePanel, sketchLines: newLines });
+                                            }}
+                                       />
+                                   </div>
+                                   <div>
+                                       <Label>Start X</Label>
+                                       <Input 
+                                            type="number" 
+                                            value={line.x1.toFixed(1)} 
+                                            onChange={(e) => {
+                                                const val = Number(e.target.value);
+                                                const dx = val - line.x1;
+                                                const newLines = (activePanel.sketchLines || []).map(l => 
+                                                    l.id === line.id ? { ...l, x1: val, x2: l.x2 + dx } : l
+                                                );
+                                                updatePanel({ ...activePanel, sketchLines: newLines });
+                                            }}
+                                       />
+                                   </div>
+                                   <div>
+                                       <Label>Start Y</Label>
+                                       <Input 
+                                            type="number" 
+                                            value={line.y1.toFixed(1)} 
+                                            onChange={(e) => {
+                                                const val = Number(e.target.value);
+                                                const dy = val - line.y1;
+                                                const newLines = (activePanel.sketchLines || []).map(l => 
+                                                    l.id === line.id ? { ...l, y1: val, y2: l.y2 + dy } : l
+                                                );
+                                                updatePanel({ ...activePanel, sketchLines: newLines });
+                                            }}
+                                       />
+                                   </div>
                                </div>
+
+                               <div className="p-4 bg-muted/20 rounded border mt-4">
+                                   <div className="text-xs text-muted-foreground uppercase font-bold mb-1">Current Length</div>
+                                   <div className="text-2xl font-mono">{length.toFixed(2)}"</div>
+                               </div>
+
                                <Button variant="destructive" className="w-full" onClick={() => {
                                    const newLines = (activePanel.sketchLines || []).filter(l => l.id !== line.id);
                                    updatePanel({ ...activePanel, sketchLines: newLines });
