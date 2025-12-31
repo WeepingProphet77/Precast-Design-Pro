@@ -45,6 +45,7 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
         { id: crypto.randomUUID(), x: 0, y: 180 },
       ],
       openings: [],
+      sketchLines: [],
       connections: [],
     };
     setProject((prev) => ({ ...prev, panels: [...prev.panels, newPanel] }));

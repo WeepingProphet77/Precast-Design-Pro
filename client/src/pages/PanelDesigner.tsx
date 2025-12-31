@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Stage, Layer, Rect, Circle, Text, Group, Line, Path, Transformer } from "react-konva";
 import { useProject } from "@/lib/store";
-import { Panel, ConnectionNode, Vertex, Opening } from "@/lib/types";
+import { Panel, ConnectionNode, Vertex, Opening, SketchLine } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,7 +12,7 @@ import { calculateLoadCombinations } from "@/lib/calculations";
 import { 
   Plus, Trash2, ZoomIn, ZoomOut, MousePointer2, PenTool, 
   Square, Circle as CircleIcon, CornerUpLeft, GripHorizontal,
-  BoxSelect, Move
+  BoxSelect, Move, Ruler
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -33,15 +33,6 @@ const getRoundedPolygonPath = (vertices: Vertex[]) => {
     const r = curr.radius || 0;
 
     if (i === 0) {
-       // Just move to start (simplified for now, full fillet logic requires vector math)
-       // For this prototype, if radius > 0, we'll just use a quad curve or similar shortcut
-       // But correct way involves finding tangent points.
-       
-       // Simplest 'rounded' visual for prototype without complex math library:
-       // Just use standard lineTo. If radius, we can skip corner.
-       // Let's implement true fillets later. For now, straight lines or standard Konva CornerRadius if shape is Rect.
-       // Since it's arbitrary polygon, we need SVG path.
-       
        path += `M ${curr.x} ${curr.y} `;
     } else {
        path += `L ${curr.x} ${curr.y} `;
@@ -79,10 +70,16 @@ export default function PanelDesigner() {
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
   const [selectedVertexId, setSelectedVertexId] = useState<string | null>(null);
   const [selectedOpeningId, setSelectedOpeningId] = useState<string | null>(null);
+  const [selectedSketchLineId, setSelectedSketchLineId] = useState<string | null>(null);
   
   const [scale, setScale] = useState(3);
-  const [tool, setTool] = useState<"select" | "vertex" | "rect_opening" | "circle_opening" | "connection">("select");
+  const [tool, setTool] = useState<"select" | "vertex" | "rect_opening" | "circle_opening" | "connection" | "sketch_line">("select");
   const [isDragging, setIsDragging] = useState(false);
+  
+  // Sketching State
+  const [isDrawingLine, setIsDrawingLine] = useState(false);
+  const [currentLineStart, setCurrentLineStart] = useState<{x: number, y: number} | null>(null);
+  const [currentMousePos, setCurrentMousePos] = useState<{x: number, y: number} | null>(null);
 
   // Sync active panel state
   useEffect(() => {
@@ -121,18 +118,59 @@ export default function PanelDesigner() {
     setTool("select");
   };
 
+  const handleStageMouseDown = (e: any) => {
+      const stage = e.target.getStage();
+      const pos = stage.getPointerPosition();
+      const x = Math.round((pos.x - canvasPadding) / scale);
+      const y = Math.round((pos.y - canvasPadding) / scale);
+
+      if (tool === "sketch_line") {
+          setIsDrawingLine(true);
+          setCurrentLineStart({ x, y });
+          setCurrentMousePos({ x, y });
+      }
+  };
+
+  const handleStageMouseMove = (e: any) => {
+      if (!isDrawingLine) return;
+      const stage = e.target.getStage();
+      const pos = stage.getPointerPosition();
+      const x = Math.round((pos.x - canvasPadding) / scale);
+      const y = Math.round((pos.y - canvasPadding) / scale);
+      setCurrentMousePos({ x, y });
+  };
+
+  const handleStageMouseUp = (e: any) => {
+      if (isDrawingLine && currentLineStart && currentMousePos) {
+          const newLine: SketchLine = {
+              id: crypto.randomUUID(),
+              x1: currentLineStart.x,
+              y1: currentLineStart.y,
+              x2: currentMousePos.x,
+              y2: currentMousePos.y
+          };
+          updatePanel({
+              ...activePanel,
+              sketchLines: [...(activePanel.sketchLines || []), newLine]
+          });
+          setIsDrawingLine(false);
+          setCurrentLineStart(null);
+          setCurrentMousePos(null);
+      }
+  };
+
   const handleStageClick = (e: any) => {
     const clickedOnEmpty = e.target === e.target.getStage();
     if (clickedOnEmpty) {
       setSelectedConnectionId(null);
       setSelectedVertexId(null);
       setSelectedOpeningId(null);
+      setSelectedSketchLineId(null);
       
       if (tool === "connection") {
         // Add connection at clicked pos
         const pos = e.target.getStage().getPointerPosition();
         const stage = e.target.getStage();
-        const scale = stage.scaleX(); // Assuming uniform scale if we used it, but here we use manual prop
         
         // We use manual scale prop on shapes, not stage
         // Local x = (stageX - groupX) / scale
@@ -177,6 +215,9 @@ export default function PanelDesigner() {
                 <ToggleGroupItem value="vertex" aria-label="Edit Vertices" title="Edit Vertices">
                     <GripHorizontal className="w-4 h-4" />
                 </ToggleGroupItem>
+                 <ToggleGroupItem value="sketch_line" aria-label="Sketch Line" title="Sketch Dimension Line">
+                    <Ruler className="w-4 h-4" />
+                </ToggleGroupItem>
                 <ToggleGroupItem value="connection" aria-label="Add Connection" title="Add Connection">
                     <BoxSelect className="w-4 h-4" />
                 </ToggleGroupItem>
@@ -215,6 +256,9 @@ export default function PanelDesigner() {
                     width={activePanel.width * scale + canvasPadding * 2} 
                     height={activePanel.height * scale + canvasPadding * 2}
                     onClick={handleStageClick}
+                    onMouseDown={handleStageMouseDown}
+                    onMouseMove={handleStageMouseMove}
+                    onMouseUp={handleStageMouseUp}
                  >
                     <Layer>
                         <Group x={canvasPadding} y={canvasPadding}>
@@ -227,6 +271,75 @@ export default function PanelDesigner() {
                                 strokeWidth={2 / scale} // visual constant width
                                 lineJoin="round"
                             />
+
+                            {/* Sketch Lines */}
+                            {(activePanel.sketchLines || []).map((line) => {
+                                const dx = line.x2 - line.x1;
+                                const dy = line.y2 - line.y1;
+                                const length = Math.sqrt(dx * dx + dy * dy).toFixed(1);
+                                const midX = (line.x1 + line.x2) / 2;
+                                const midY = (line.y1 + line.y2) / 2;
+                                
+                                return (
+                                    <Group 
+                                        key={line.id}
+                                        onClick={(e) => {
+                                            e.cancelBubble = true;
+                                            setSelectedSketchLineId(line.id);
+                                            setSelectedConnectionId(null);
+                                            setSelectedOpeningId(null);
+                                            setSelectedVertexId(null);
+                                        }}
+                                    >
+                                        <Line
+                                            points={[line.x1 * scale, line.y1 * scale, line.x2 * scale, line.y2 * scale]}
+                                            stroke={selectedSketchLineId === line.id ? "#E74C3C" : "#95A5A6"}
+                                            strokeWidth={2}
+                                            dash={[5, 5]}
+                                        />
+                                        {/* Dimension Label */}
+                                        <Rect
+                                             x={midX * scale - 20}
+                                             y={midY * scale - 10}
+                                             width={40}
+                                             height={20}
+                                             fill="white"
+                                             opacity={0.8}
+                                             cornerRadius={4}
+                                        />
+                                        <Text
+                                            x={midX * scale - 20}
+                                            y={midY * scale - 5}
+                                            width={40}
+                                            text={`${length}"`}
+                                            fontSize={12}
+                                            fontFamily="Roboto Mono"
+                                            fill="#2C3E50"
+                                            align="center"
+                                        />
+                                    </Group>
+                                );
+                            })}
+                            
+                            {/* Temporary Drawing Line */}
+                            {isDrawingLine && currentLineStart && currentMousePos && (
+                                <Group>
+                                    <Line
+                                        points={[currentLineStart.x * scale, currentLineStart.y * scale, currentMousePos.x * scale, currentMousePos.y * scale]}
+                                        stroke="#E74C3C"
+                                        strokeWidth={2}
+                                        dash={[5, 5]}
+                                    />
+                                     <Text
+                                        x={currentMousePos.x * scale + 10}
+                                        y={currentMousePos.y * scale + 10}
+                                        text={`${Math.sqrt(Math.pow(currentMousePos.x - currentLineStart.x, 2) + Math.pow(currentMousePos.y - currentLineStart.y, 2)).toFixed(1)}"`}
+                                        fontSize={12}
+                                        fontFamily="Roboto Mono"
+                                        fill="#E74C3C"
+                                    />
+                                </Group>
+                            )}
 
                             {/* Openings (Visual Holes) */}
                             {activePanel.openings.map(op => (
@@ -245,6 +358,7 @@ export default function PanelDesigner() {
                                         e.cancelBubble = true;
                                         setSelectedOpeningId(op.id);
                                         setSelectedConnectionId(null);
+                                        setSelectedSketchLineId(null);
                                     }}
                                 >
                                     {op.type === "rect" ? (
@@ -293,6 +407,7 @@ export default function PanelDesigner() {
                                         setSelectedConnectionId(conn.id);
                                         setSelectedOpeningId(null);
                                         setSelectedVertexId(null);
+                                        setSelectedSketchLineId(null);
                                     }}
                                 >
                                     <Circle 
@@ -456,13 +571,37 @@ export default function PanelDesigner() {
                          )
                     })()}
                 </div>
+             ) : selectedSketchLineId ? (
+                <div className="p-4">
+                   <h3 className="font-bold text-lg mb-4">Sketch Line Properties</h3>
+                   {(() => {
+                       const line = (activePanel.sketchLines || []).find(l => l.id === selectedSketchLineId);
+                       if (!line) return null;
+                       const length = Math.sqrt(Math.pow(line.x2 - line.x1, 2) + Math.pow(line.y2 - line.y1, 2)).toFixed(2);
+                       return (
+                           <div className="space-y-4">
+                               <div className="p-4 bg-muted/20 rounded border">
+                                   <div className="text-xs text-muted-foreground uppercase font-bold mb-1">Length</div>
+                                   <div className="text-2xl font-mono">{length}"</div>
+                               </div>
+                               <Button variant="destructive" className="w-full" onClick={() => {
+                                   const newLines = (activePanel.sketchLines || []).filter(l => l.id !== line.id);
+                                   updatePanel({ ...activePanel, sketchLines: newLines });
+                                   setSelectedSketchLineId(null);
+                               }}>
+                                   <Trash2 className="w-4 h-4 mr-2" /> Delete Line
+                               </Button>
+                           </div>
+                       )
+                   })()}
+                </div>
              ) : (
                 <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground p-8 text-center bg-muted/5">
                      <MousePointer2 className="w-12 h-12 mb-4 opacity-20" />
                      <p className="font-medium">Selection Mode</p>
                      <p className="text-sm opacity-70 mt-2">
                         Select an element to edit properties.<br/>
-                        Use toolbar to switch between Editing Vertices, Placing Connections, or Adding Openings.
+                        Use toolbar to switch between Editing Vertices, Placing Connections, Adding Openings, or Sketching Lines.
                      </p>
                  </div>
              )}
