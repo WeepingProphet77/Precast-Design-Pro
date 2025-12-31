@@ -65,7 +65,16 @@ export interface Panel {
   weight?: number; // lbs
   perimeter: Vertex[];
   openings: Opening[];
+  sketchLines: SketchLine[];
   connections: ConnectionNode[];
+}
+
+export interface SketchLine {
+  id: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
 }
 
 export interface ConnectionCapacity {
@@ -113,6 +122,7 @@ export const createDefaultProject = (): ProjectData => ({
         { id: "v4", x: 0, y: 180 },
       ],
       openings: [],
+      sketchLines: [],
       connections: [
         {
           id: "c1",
