@@ -123,34 +123,7 @@ export const createDefaultProject = (): ProjectData => ({
       ],
       openings: [],
       sketchLines: [],
-      connections: [
-        {
-          id: "c1",
-          label: "TL",
-          type: "A",
-          x: 12,
-          y: 168,
-          forces: {
-            D: { x: 0, y: 1500, z: 0 },
-            L: { x: 0, y: 0, z: 0 },
-            W: { x: 0, y: 0, z: 800 },
-            E: { x: 500, y: 0, z: 200 },
-          },
-        },
-        {
-          id: "c2",
-          label: "TR",
-          type: "A",
-          x: 108,
-          y: 168,
-          forces: {
-            D: { x: 0, y: 1500, z: 0 },
-            L: { x: 0, y: 0, z: 0 },
-            W: { x: 0, y: 0, z: 800 },
-            E: { x: 500, y: 0, z: 200 },
-          },
-        },
-      ],
+      connections: [],
     },
   ],
   capacities: [
