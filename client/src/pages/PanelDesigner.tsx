@@ -12,7 +12,8 @@ import { calculateLoadCombinations } from "@/lib/calculations";
 import { 
   Plus, Trash2, ZoomIn, ZoomOut, MousePointer2, PenTool, 
   Square, Circle as CircleIcon, CornerUpLeft, GripHorizontal,
-  BoxSelect, Move, Ruler, Maximize
+  BoxSelect, Move, Ruler, Maximize, Minus, ArrowUpRight, 
+  CornerDownRight, Spline, Terminal
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -76,13 +77,34 @@ export default function PanelDesigner() {
   const [selectedSketchLineId, setSelectedSketchLineId] = useState<string | null>(null);
   
   const [scale, setScale] = useState(3);
-  const [tool, setTool] = useState<"select" | "vertex" | "rect_opening" | "circle_opening" | "connection" | "sketch_line">("select");
+  const [tool, setTool] = useState<"select" | "vertex" | "rect_opening" | "circle_opening" | "connection" | "sketch_line" | "line" | "arc" | "offset" | "fillet">("select");
   const [isDragging, setIsDragging] = useState(false);
   
   // Drawing State (Click-Move-Click)
-  const [drawingStep, setDrawingStep] = useState<0 | 1>(0);
-  const [drawingStartPos, setDrawingStartPos] = useState<{x: number, y: number} | null>(null);
+  const [drawingStep, setDrawingStep] = useState<number>(0);
+  const [drawingPoints, setDrawingPoints] = useState<{x: number, y: number}[]>([]);
   const [currentMousePos, setCurrentMousePos] = useState<{x: number, y: number} | null>(null);
+  
+  // Command Line State
+  const [commandInput, setCommandInput] = useState("");
+  const [commandHistory, setCommandHistory] = useState<string[]>(["Ready. Select a tool or type a command."]);
+  const commandInputRef = useRef<HTMLInputElement>(null);
+  
+  // Helper: Convert screen Y to CAD Y (flip for origin bottom-left)
+  const screenToCAD = (screenX: number, screenY: number) => ({
+    x: Math.round(screenX),
+    y: Math.round(activePanel ? activePanel.height - screenY : screenY)
+  });
+  
+  // Helper: Convert CAD Y to screen Y
+  const cadToScreen = (cadX: number, cadY: number) => ({
+    x: cadX,
+    y: activePanel ? activePanel.height - cadY : cadY
+  });
+  
+  const addToHistory = (msg: string) => {
+    setCommandHistory(prev => [...prev.slice(-20), msg]);
+  };
 
   // Keyboard Navigation
   useEffect(() => {
@@ -98,8 +120,8 @@ export default function PanelDesigner() {
       let dx = 0;
       let dy = 0;
 
-      if (e.key === "ArrowUp") dy = -step;
-      if (e.key === "ArrowDown") dy = step;
+      if (e.key === "ArrowUp") dy = step;  // Y-up coordinate system
+      if (e.key === "ArrowDown") dy = -step;
       if (e.key === "ArrowLeft") dx = -step;
       if (e.key === "ArrowRight") dx = step;
 
@@ -135,8 +157,22 @@ export default function PanelDesigner() {
   // Reset drawing state when tool changes
   useEffect(() => {
     setDrawingStep(0);
-    setDrawingStartPos(null);
+    setDrawingPoints([]);
+    addToHistory(`Tool: ${tool.toUpperCase()}`);
   }, [tool]);
+  
+  // Handle Escape key to cancel current operation
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setDrawingStep(0);
+        setDrawingPoints([]);
+        addToHistory("Command cancelled.");
+      }
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, []);
 
   if (!activePanel) return <div className="p-8">Loading...</div>;
 
@@ -157,13 +193,20 @@ export default function PanelDesigner() {
   const handleStageMouseMove = (e: any) => {
       const stage = e.target.getStage();
       const pos = stage.getPointerPosition();
-      const x = Math.round((pos.x - canvasPadding) / scale);
-      const y = Math.round((pos.y - canvasPadding) / scale);
-      setCurrentMousePos({ x, y });
+      const screenX = (pos.x - canvasPadding) / scale;
+      const screenY = (pos.y - canvasPadding) / scale;
+      const cad = screenToCAD(screenX, screenY);
+      setCurrentMousePos(cad);
   };
 
   const handleStageClick = (e: any) => {
     const clickedOnEmpty = e.target === e.target.getStage();
+    const stage = e.target.getStage();
+    const pos = stage.getPointerPosition();
+    const screenX = (pos.x - canvasPadding) / scale;
+    const screenY = (pos.y - canvasPadding) / scale;
+    const cad = screenToCAD(screenX, screenY);
+    const { x, y } = cad;
     
     // Select Tool Logic
     if (tool === "select") {
@@ -179,11 +222,6 @@ export default function PanelDesigner() {
 
     // Connection Tool Logic (Simple Click)
     if (tool === "connection") {
-        const stage = e.target.getStage();
-        const pos = stage.getPointerPosition();
-        const x = Math.round((pos.x - canvasPadding) / scale);
-        const y = Math.round((pos.y - canvasPadding) / scale);
-        
         const id = crypto.randomUUID();
         addConnection(activePanel.id, {
             id,
@@ -194,76 +232,224 @@ export default function PanelDesigner() {
             forces: { D: {x:0,y:0,z:0}, L: {x:0,y:0,z:0}, W: {x:0,y:0,z:0}, E: {x:0,y:0,z:0} }
         });
         setSelectedConnectionId(id);
+        addToHistory(`Connection placed at (${x}, ${y})`);
         setTool("select");
         return;
     }
 
-    // Drawing Tools (Rect, Circle, Line) - Click-Move-Click
-    if (tool === "rect_opening" || tool === "circle_opening" || tool === "sketch_line") {
-        const stage = e.target.getStage();
-        const pos = stage.getPointerPosition();
-        const x = Math.round((pos.x - canvasPadding) / scale);
-        const y = Math.round((pos.y - canvasPadding) / scale);
-
+    // LINE tool - AutoCAD style continuous polyline
+    if (tool === "line" || tool === "sketch_line") {
         if (drawingStep === 0) {
-            // Start Drawing
             setDrawingStep(1);
-            setDrawingStartPos({ x, y });
+            setDrawingPoints([{ x, y }]);
+            addToHistory(`LINE: Specify first point: (${x}, ${y})`);
         } else {
-            // Finish Drawing
-            if (!drawingStartPos) return;
-
-            if (tool === "rect_opening") {
-                 const minX = Math.min(drawingStartPos.x, x);
-                 const minY = Math.min(drawingStartPos.y, y);
-                 const width = Math.abs(x - drawingStartPos.x);
-                 const height = Math.abs(y - drawingStartPos.y);
-                 
-                 if (width > 0 && height > 0) {
-                     const newOpening: Opening = {
-                        id: crypto.randomUUID(),
-                        type: "rect",
-                        x: minX,
-                        y: minY,
-                        width,
-                        height
-                     };
-                     updatePanel({ ...activePanel, openings: [...activePanel.openings, newOpening] });
-                 }
-            } else if (tool === "circle_opening") {
-                 const dx = x - drawingStartPos.x;
-                 const dy = y - drawingStartPos.y;
-                 const radius = Math.sqrt(dx*dx + dy*dy);
-                 const diameter = radius * 2;
-                 
-                 if (radius > 0) {
-                     const newOpening: Opening = {
-                        id: crypto.randomUUID(),
-                        type: "circle",
-                        x: drawingStartPos.x - radius,
-                        y: drawingStartPos.y - radius,
-                        width: diameter,
-                        height: diameter
-                     };
-                     updatePanel({ ...activePanel, openings: [...activePanel.openings, newOpening] });
-                 }
-            } else if (tool === "sketch_line") {
-                 const newLine: SketchLine = {
-                    id: crypto.randomUUID(),
-                    x1: drawingStartPos.x,
-                    y1: drawingStartPos.y,
-                    x2: x,
-                    y2: y
-                 };
-                 updatePanel({ ...activePanel, sketchLines: [...(activePanel.sketchLines || []), newLine] });
-            }
-            
-            // Reset and stay in tool (AutoCAD style continuous command) or switch to select?
-            // Usually stay in tool.
-            setDrawingStep(0);
-            setDrawingStartPos(null);
+            const lastPt = drawingPoints[drawingPoints.length - 1];
+            const newLine: SketchLine = {
+                id: crypto.randomUUID(),
+                x1: lastPt.x,
+                y1: lastPt.y,
+                x2: x,
+                y2: y
+            };
+            updatePanel({ ...activePanel, sketchLines: [...(activePanel.sketchLines || []), newLine] });
+            setDrawingPoints([...drawingPoints, { x, y }]);
+            const len = Math.sqrt(Math.pow(x - lastPt.x, 2) + Math.pow(y - lastPt.y, 2));
+            addToHistory(`LINE: To (${x}, ${y}), Length: ${len.toFixed(2)}"`);
         }
+        return;
     }
+
+    // RECTANGLE tool - Two corner clicks
+    if (tool === "rect_opening") {
+        if (drawingStep === 0) {
+            setDrawingStep(1);
+            setDrawingPoints([{ x, y }]);
+            addToHistory(`RECTANGLE: Specify first corner: (${x}, ${y})`);
+        } else {
+            const p1 = drawingPoints[0];
+            const minX = Math.min(p1.x, x);
+            const minY = Math.min(p1.y, y);
+            const width = Math.abs(x - p1.x);
+            const height = Math.abs(y - p1.y);
+            
+            if (width > 0 && height > 0) {
+                const newOpening: Opening = {
+                    id: crypto.randomUUID(),
+                    type: "rect",
+                    x: minX,
+                    y: minY,
+                    width,
+                    height
+                };
+                updatePanel({ ...activePanel, openings: [...activePanel.openings, newOpening] });
+                addToHistory(`RECTANGLE: Created ${width}" x ${height}" at (${minX}, ${minY})`);
+            }
+            setDrawingStep(0);
+            setDrawingPoints([]);
+        }
+        return;
+    }
+
+    // CIRCLE tool - Center and radius
+    if (tool === "circle_opening") {
+        if (drawingStep === 0) {
+            setDrawingStep(1);
+            setDrawingPoints([{ x, y }]);
+            addToHistory(`CIRCLE: Specify center: (${x}, ${y})`);
+        } else {
+            const center = drawingPoints[0];
+            const dx = x - center.x;
+            const dy = y - center.y;
+            const radius = Math.sqrt(dx*dx + dy*dy);
+            const diameter = radius * 2;
+            
+            if (radius > 0) {
+                const newOpening: Opening = {
+                    id: crypto.randomUUID(),
+                    type: "circle",
+                    x: center.x - radius,
+                    y: center.y - radius,
+                    width: diameter,
+                    height: diameter
+                };
+                updatePanel({ ...activePanel, openings: [...activePanel.openings, newOpening] });
+                addToHistory(`CIRCLE: Created R=${radius.toFixed(2)}" at center (${center.x}, ${center.y})`);
+            }
+            setDrawingStep(0);
+            setDrawingPoints([]);
+        }
+        return;
+    }
+
+    // ARC tool - 3-point arc
+    if (tool === "arc") {
+        if (drawingStep === 0) {
+            setDrawingStep(1);
+            setDrawingPoints([{ x, y }]);
+            addToHistory(`ARC: Specify start point: (${x}, ${y})`);
+        } else if (drawingStep === 1) {
+            setDrawingStep(2);
+            setDrawingPoints([...drawingPoints, { x, y }]);
+            addToHistory(`ARC: Specify second point: (${x}, ${y})`);
+        } else {
+            // Create arc as a series of line segments (approximation)
+            const [p1, p2] = drawingPoints;
+            const p3 = { x, y };
+            // For now, create two lines as placeholder for arc
+            const line1: SketchLine = { id: crypto.randomUUID(), x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y };
+            const line2: SketchLine = { id: crypto.randomUUID(), x1: p2.x, y1: p2.y, x2: p3.x, y2: p3.y };
+            updatePanel({ ...activePanel, sketchLines: [...(activePanel.sketchLines || []), line1, line2] });
+            addToHistory(`ARC: Created through (${p1.x},${p1.y}), (${p2.x},${p2.y}), (${p3.x},${p3.y})`);
+            setDrawingStep(0);
+            setDrawingPoints([]);
+        }
+        return;
+    }
+
+    // OFFSET tool - Select edge then specify distance
+    if (tool === "offset") {
+        if (selectedEdgeIndex !== null && drawingStep === 0) {
+            setDrawingStep(1);
+            addToHistory("OFFSET: Click to specify offset direction and distance");
+        } else if (drawingStep === 1 && selectedEdgeIndex !== null) {
+            const idx = selectedEdgeIndex;
+            const v1 = activePanel.perimeter[idx];
+            const v2 = activePanel.perimeter[(idx + 1) % activePanel.perimeter.length];
+            
+            // Calculate offset direction from edge midpoint to click point
+            const midX = (v1.x + v2.x) / 2;
+            const midY = (v1.y + v2.y) / 2;
+            const offsetDist = Math.sqrt(Math.pow(x - midX, 2) + Math.pow(y - midY, 2));
+            
+            // Create offset line
+            const dx = v2.x - v1.x;
+            const dy = v2.y - v1.y;
+            const len = Math.sqrt(dx*dx + dy*dy);
+            const nx = -dy / len; // perpendicular
+            const ny = dx / len;
+            
+            // Determine direction based on which side was clicked
+            const dotProduct = (x - midX) * nx + (y - midY) * ny;
+            const sign = dotProduct >= 0 ? 1 : -1;
+            
+            const newLine: SketchLine = {
+                id: crypto.randomUUID(),
+                x1: v1.x + nx * offsetDist * sign,
+                y1: v1.y + ny * offsetDist * sign,
+                x2: v2.x + nx * offsetDist * sign,
+                y2: v2.y + ny * offsetDist * sign
+            };
+            updatePanel({ ...activePanel, sketchLines: [...(activePanel.sketchLines || []), newLine] });
+            addToHistory(`OFFSET: Created line offset by ${offsetDist.toFixed(2)}"`);
+            setDrawingStep(0);
+            setSelectedEdgeIndex(null);
+        } else {
+            addToHistory("OFFSET: First select an edge, then click to specify offset");
+        }
+        return;
+    }
+
+    // FILLET tool - Select vertex to apply radius
+    if (tool === "fillet") {
+        addToHistory("FILLET: Select a vertex in Vertex mode to apply fillet radius");
+        return;
+    }
+  };
+  
+  // Handle command line input
+  const handleCommand = (cmd: string) => {
+    const parts = cmd.trim().toUpperCase().split(/\s+/);
+    const command = parts[0];
+    
+    addToHistory(`> ${cmd}`);
+    
+    switch(command) {
+        case "L":
+        case "LINE":
+            setTool("line");
+            break;
+        case "REC":
+        case "RECTANGLE":
+            setTool("rect_opening");
+            break;
+        case "C":
+        case "CIRCLE":
+            setTool("circle_opening");
+            break;
+        case "A":
+        case "ARC":
+            setTool("arc");
+            break;
+        case "O":
+        case "OFFSET":
+            setTool("offset");
+            break;
+        case "F":
+        case "FILLET":
+            setTool("fillet");
+            break;
+        case "ESC":
+        case "CANCEL":
+            setDrawingStep(0);
+            setDrawingPoints([]);
+            setTool("select");
+            addToHistory("Command cancelled.");
+            break;
+        default:
+            // Try to parse as coordinate input (x,y)
+            const coordMatch = cmd.match(/^(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)$/);
+            if (coordMatch && drawingStep > 0) {
+                const inputX = parseFloat(coordMatch[1]);
+                const inputY = parseFloat(coordMatch[2]);
+                // Simulate click at this coordinate
+                addToHistory(`Point: (${inputX}, ${inputY})`);
+                // For now, just log - would need to trigger the drawing logic
+            } else {
+                addToHistory(`Unknown command: ${cmd}`);
+            }
+    }
+    setCommandInput("");
   };
 
   return (
@@ -283,22 +469,31 @@ export default function PanelDesigner() {
             </Select>
             <Separator orientation="vertical" className="h-8" />
             <ToggleGroup type="single" value={tool} onValueChange={(v) => v && setTool(v as any)}>
-                <ToggleGroupItem value="select" aria-label="Select" title="Select / Move">
+                <ToggleGroupItem value="select" aria-label="Select" title="Select / Move (ESC)">
                     <MousePointer2 className="w-4 h-4" />
                 </ToggleGroupItem>
                 <ToggleGroupItem value="vertex" aria-label="Edit Vertices" title="Edit Vertices">
                     <GripHorizontal className="w-4 h-4" />
                 </ToggleGroupItem>
-                 <ToggleGroupItem value="sketch_line" aria-label="Sketch Line" title="Sketch Dimension Line">
-                    <Ruler className="w-4 h-4" />
+                <ToggleGroupItem value="line" aria-label="Line" title="Line (L)">
+                    <Minus className="w-4 h-4" />
                 </ToggleGroupItem>
-                <ToggleGroupItem value="rect_opening" aria-label="Draw Rectangle" title="Draw Rectangular Opening">
+                <ToggleGroupItem value="rect_opening" aria-label="Rectangle" title="Rectangle (REC)">
                     <Square className="w-4 h-4" />
                 </ToggleGroupItem>
-                <ToggleGroupItem value="circle_opening" aria-label="Draw Circle" title="Draw Round Opening">
+                <ToggleGroupItem value="circle_opening" aria-label="Circle" title="Circle (C)">
                     <CircleIcon className="w-4 h-4" />
                 </ToggleGroupItem>
-                <ToggleGroupItem value="connection" aria-label="Add Connection" title="Add Connection">
+                <ToggleGroupItem value="arc" aria-label="Arc" title="Arc (A) - 3 point">
+                    <Spline className="w-4 h-4" />
+                </ToggleGroupItem>
+                <ToggleGroupItem value="offset" aria-label="Offset" title="Offset (O)">
+                    <ArrowUpRight className="w-4 h-4" />
+                </ToggleGroupItem>
+                <ToggleGroupItem value="fillet" aria-label="Fillet" title="Fillet (F)">
+                    <CornerDownRight className="w-4 h-4" />
+                </ToggleGroupItem>
+                <ToggleGroupItem value="connection" aria-label="Add Connection" title="Add Connection Point">
                     <BoxSelect className="w-4 h-4" />
                 </ToggleGroupItem>
             </ToggleGroup>
@@ -358,7 +553,14 @@ export default function PanelDesigner() {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Canvas Area */}
-        <div className="flex-1 bg-slate-100/50 relative overflow-auto grid-bg flex items-center justify-center p-8">
+        <div className="flex-1 bg-slate-100/50 relative overflow-hidden flex flex-col">
+          {/* Coordinate Display */}
+          <div className="absolute top-2 left-2 z-10 bg-slate-800 text-white px-3 py-1 rounded text-xs font-mono">
+            {currentMousePos ? `X: ${currentMousePos.x.toFixed(1)}, Y: ${currentMousePos.y.toFixed(1)}` : "Move cursor to see coordinates"}
+          </div>
+          
+          {/* Drawing Canvas */}
+          <div className="flex-1 overflow-auto grid-bg flex items-center justify-center p-8">
              <div 
                 className="shadow-xl bg-white relative ring-1 ring-black/5"
                 onWheel={(e) => {
@@ -417,13 +619,14 @@ export default function PanelDesigner() {
                                 );
                             })}
 
-                            {/* Sketch Lines */}
+                            {/* Sketch Lines (Y-flipped) */}
                             {(activePanel.sketchLines || []).map((line) => {
                                 const dx = line.x2 - line.x1;
                                 const dy = line.y2 - line.y1;
                                 const length = Math.sqrt(dx * dx + dy * dy).toFixed(1);
-                                const midX = (line.x1 + line.x2) / 2;
-                                const midY = (line.y1 + line.y2) / 2;
+                                const p1 = cadToScreen(line.x1, line.y1);
+                                const p2 = cadToScreen(line.x2, line.y2);
+                                const midScreen = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
                                 
                                 return (
                                     <Group 
@@ -437,15 +640,15 @@ export default function PanelDesigner() {
                                         }}
                                     >
                                         <Line
-                                            points={[line.x1 * scale, line.y1 * scale, line.x2 * scale, line.y2 * scale]}
+                                            points={[p1.x * scale, p1.y * scale, p2.x * scale, p2.y * scale]}
                                             stroke={selectedSketchLineId === line.id ? "#E74C3C" : "#95A5A6"}
                                             strokeWidth={2}
                                             dash={[5, 5]}
                                         />
                                         {/* Dimension Label */}
                                         <Rect
-                                             x={midX * scale - 20}
-                                             y={midY * scale - 10}
+                                             x={midScreen.x * scale - 20}
+                                             y={midScreen.y * scale - 10}
                                              width={40}
                                              height={20}
                                              fill="white"
@@ -453,8 +656,8 @@ export default function PanelDesigner() {
                                              cornerRadius={4}
                                         />
                                         <Text
-                                            x={midX * scale - 20}
-                                            y={midY * scale - 5}
+                                            x={midScreen.x * scale - 20}
+                                            y={midScreen.y * scale - 5}
                                             width={40}
                                             text={`${length}"`}
                                             fontSize={12}
@@ -467,86 +670,148 @@ export default function PanelDesigner() {
                             })}
                             
                             {/* Ghost Drawing Shapes */}
-                            {drawingStep === 1 && drawingStartPos && currentMousePos && (
-                                <Group>
-                                    {tool === "rect_opening" && (
-                                        <Group>
-                                            <Rect
-                                                x={Math.min(drawingStartPos.x, currentMousePos.x) * scale}
-                                                y={Math.min(drawingStartPos.y, currentMousePos.y) * scale}
-                                                width={Math.abs(currentMousePos.x - drawingStartPos.x) * scale}
-                                                height={Math.abs(currentMousePos.y - drawingStartPos.y) * scale}
-                                                stroke="#3498DB"
-                                                strokeWidth={1}
-                                                dash={[5, 5]}
-                                                fill="rgba(52, 152, 219, 0.2)"
-                                            />
-                                            {/* Dimensions */}
-                                            <Text
-                                                x={Math.min(drawingStartPos.x, currentMousePos.x) * scale}
-                                                y={Math.min(drawingStartPos.y, currentMousePos.y) * scale - 20}
-                                                text={`${Math.abs(currentMousePos.x - drawingStartPos.x).toFixed(1)}" x ${Math.abs(currentMousePos.y - drawingStartPos.y).toFixed(1)}"`}
-                                                fontSize={12}
-                                                fill="#3498DB"
-                                            />
-                                        </Group>
-                                    )}
-                                    {tool === "circle_opening" && (
-                                        <Group>
-                                            {/* Center Marker */}
-                                            <Circle
-                                                x={drawingStartPos.x * scale}
-                                                y={drawingStartPos.y * scale}
-                                                radius={3}
-                                                fill="#3498DB"
-                                            />
-                                            {/* The Circle being drawn */}
-                                            <Circle
-                                                x={drawingStartPos.x * scale}
-                                                y={drawingStartPos.y * scale}
-                                                radius={Math.sqrt(Math.pow(currentMousePos.x - drawingStartPos.x, 2) + Math.pow(currentMousePos.y - drawingStartPos.y, 2)) * scale}
-                                                stroke="#3498DB"
-                                                strokeWidth={1}
-                                                dash={[5, 5]}
-                                                fill="rgba(52, 152, 219, 0.2)"
-                                            />
-                                            {/* Radius Line */}
-                                            <Line 
-                                                points={[drawingStartPos.x * scale, drawingStartPos.y * scale, currentMousePos.x * scale, currentMousePos.y * scale]}
-                                                stroke="#3498DB"
-                                                strokeWidth={1}
-                                                dash={[2, 2]}
-                                            />
-                                            {/* Radius Text */}
-                                            <Text 
-                                                x={currentMousePos.x * scale + 10}
-                                                y={currentMousePos.y * scale}
-                                                text={`R: ${Math.sqrt(Math.pow(currentMousePos.x - drawingStartPos.x, 2) + Math.pow(currentMousePos.y - drawingStartPos.y, 2)).toFixed(1)}"`}
-                                                fontSize={12}
-                                                fill="#3498DB"
-                                            />
-                                        </Group>
-                                    )}
-                                    {tool === "sketch_line" && (
-                                        <Group>
-                                            <Line
-                                                points={[drawingStartPos.x * scale, drawingStartPos.y * scale, currentMousePos.x * scale, currentMousePos.y * scale]}
-                                                stroke="#E74C3C"
-                                                strokeWidth={2}
-                                                dash={[5, 5]}
-                                            />
-                                             <Text
-                                                x={currentMousePos.x * scale + 10}
-                                                y={currentMousePos.y * scale + 10}
-                                                text={`${Math.sqrt(Math.pow(currentMousePos.x - drawingStartPos.x, 2) + Math.pow(currentMousePos.y - drawingStartPos.y, 2)).toFixed(1)}"`}
-                                                fontSize={12}
-                                                fontFamily="Roboto Mono"
-                                                fill="#E74C3C"
-                                            />
-                                        </Group>
-                                    )}
-                                </Group>
-                            )}
+                            {drawingStep > 0 && drawingPoints.length > 0 && currentMousePos && (() => {
+                                const p1 = drawingPoints[0];
+                                const p1Screen = cadToScreen(p1.x, p1.y);
+                                const mouseScreen = cadToScreen(currentMousePos.x, currentMousePos.y);
+                                
+                                return (
+                                    <Group>
+                                        {/* Rectangle Ghost */}
+                                        {tool === "rect_opening" && (
+                                            <Group>
+                                                <Rect
+                                                    x={Math.min(p1Screen.x, mouseScreen.x) * scale}
+                                                    y={Math.min(p1Screen.y, mouseScreen.y) * scale}
+                                                    width={Math.abs(currentMousePos.x - p1.x) * scale}
+                                                    height={Math.abs(currentMousePos.y - p1.y) * scale}
+                                                    stroke="#3498DB"
+                                                    strokeWidth={1}
+                                                    dash={[5, 5]}
+                                                    fill="rgba(52, 152, 219, 0.2)"
+                                                />
+                                                <Text
+                                                    x={Math.min(p1Screen.x, mouseScreen.x) * scale}
+                                                    y={Math.min(p1Screen.y, mouseScreen.y) * scale - 20}
+                                                    text={`${Math.abs(currentMousePos.x - p1.x).toFixed(1)}" x ${Math.abs(currentMousePos.y - p1.y).toFixed(1)}"`}
+                                                    fontSize={12}
+                                                    fill="#3498DB"
+                                                />
+                                            </Group>
+                                        )}
+                                        
+                                        {/* Circle Ghost */}
+                                        {tool === "circle_opening" && (
+                                            <Group>
+                                                <Circle
+                                                    x={p1Screen.x * scale}
+                                                    y={p1Screen.y * scale}
+                                                    radius={3}
+                                                    fill="#3498DB"
+                                                />
+                                                <Circle
+                                                    x={p1Screen.x * scale}
+                                                    y={p1Screen.y * scale}
+                                                    radius={Math.sqrt(Math.pow(currentMousePos.x - p1.x, 2) + Math.pow(currentMousePos.y - p1.y, 2)) * scale}
+                                                    stroke="#3498DB"
+                                                    strokeWidth={1}
+                                                    dash={[5, 5]}
+                                                    fill="rgba(52, 152, 219, 0.2)"
+                                                />
+                                                <Line 
+                                                    points={[p1Screen.x * scale, p1Screen.y * scale, mouseScreen.x * scale, mouseScreen.y * scale]}
+                                                    stroke="#3498DB"
+                                                    strokeWidth={1}
+                                                    dash={[2, 2]}
+                                                />
+                                                <Text 
+                                                    x={mouseScreen.x * scale + 10}
+                                                    y={mouseScreen.y * scale}
+                                                    text={`R: ${Math.sqrt(Math.pow(currentMousePos.x - p1.x, 2) + Math.pow(currentMousePos.y - p1.y, 2)).toFixed(1)}"`}
+                                                    fontSize={12}
+                                                    fill="#3498DB"
+                                                />
+                                            </Group>
+                                        )}
+                                        
+                                        {/* Line Ghost */}
+                                        {(tool === "line" || tool === "sketch_line") && (
+                                            <Group>
+                                                {/* Draw all existing points as a polyline preview */}
+                                                {drawingPoints.map((pt, i) => {
+                                                    const ptScreen = cadToScreen(pt.x, pt.y);
+                                                    return (
+                                                        <Circle
+                                                            key={i}
+                                                            x={ptScreen.x * scale}
+                                                            y={ptScreen.y * scale}
+                                                            radius={4}
+                                                            fill="#E74C3C"
+                                                        />
+                                                    );
+                                                })}
+                                                {/* Current line being drawn */}
+                                                {(() => {
+                                                    const lastPt = drawingPoints[drawingPoints.length - 1];
+                                                    const lastScreen = cadToScreen(lastPt.x, lastPt.y);
+                                                    const len = Math.sqrt(Math.pow(currentMousePos.x - lastPt.x, 2) + Math.pow(currentMousePos.y - lastPt.y, 2));
+                                                    const angle = Math.atan2(currentMousePos.y - lastPt.y, currentMousePos.x - lastPt.x) * 180 / Math.PI;
+                                                    return (
+                                                        <Group>
+                                                            <Line
+                                                                points={[lastScreen.x * scale, lastScreen.y * scale, mouseScreen.x * scale, mouseScreen.y * scale]}
+                                                                stroke="#E74C3C"
+                                                                strokeWidth={2}
+                                                                dash={[5, 5]}
+                                                            />
+                                                            <Text
+                                                                x={mouseScreen.x * scale + 10}
+                                                                y={mouseScreen.y * scale - 20}
+                                                                text={`${len.toFixed(1)}" @ ${angle.toFixed(1)}°`}
+                                                                fontSize={12}
+                                                                fontFamily="Roboto Mono"
+                                                                fill="#E74C3C"
+                                                            />
+                                                        </Group>
+                                                    );
+                                                })()}
+                                            </Group>
+                                        )}
+                                        
+                                        {/* Arc Ghost */}
+                                        {tool === "arc" && (
+                                            <Group>
+                                                {drawingPoints.map((pt, i) => {
+                                                    const ptScreen = cadToScreen(pt.x, pt.y);
+                                                    return (
+                                                        <Circle
+                                                            key={i}
+                                                            x={ptScreen.x * scale}
+                                                            y={ptScreen.y * scale}
+                                                            radius={4}
+                                                            fill="#9B59B6"
+                                                        />
+                                                    );
+                                                })}
+                                                {drawingPoints.length >= 1 && (
+                                                    <Line
+                                                        points={[
+                                                            ...drawingPoints.flatMap(pt => {
+                                                                const s = cadToScreen(pt.x, pt.y);
+                                                                return [s.x * scale, s.y * scale];
+                                                            }),
+                                                            mouseScreen.x * scale, mouseScreen.y * scale
+                                                        ]}
+                                                        stroke="#9B59B6"
+                                                        strokeWidth={2}
+                                                        dash={[5, 5]}
+                                                    />
+                                                )}
+                                            </Group>
+                                        )}
+                                    </Group>
+                                );
+                            })()}
 
                             {/* Openings (Visual Holes) */}
                             {activePanel.openings.map(op => (
@@ -685,6 +950,34 @@ export default function PanelDesigner() {
                     </Layer>
                  </Stage>
              </div>
+          </div>
+          
+          {/* Command Line */}
+          <div className="h-32 border-t bg-slate-900 text-white font-mono text-sm flex flex-col">
+            <ScrollArea className="flex-1 p-2">
+              {commandHistory.map((line, i) => (
+                <div key={i} className={`${line.startsWith('>') ? 'text-yellow-400' : 'text-slate-300'}`}>
+                  {line}
+                </div>
+              ))}
+            </ScrollArea>
+            <div className="flex items-center border-t border-slate-700 px-2">
+              <span className="text-green-400 mr-2">Command:</span>
+              <input
+                ref={commandInputRef}
+                type="text"
+                value={commandInput}
+                onChange={(e) => setCommandInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && commandInput.trim()) {
+                    handleCommand(commandInput);
+                  }
+                }}
+                className="flex-1 bg-transparent border-none outline-none text-white py-2"
+                placeholder="Type command (L=Line, REC=Rectangle, C=Circle, ESC=Cancel)..."
+              />
+            </div>
+          </div>
         </div>
 
         {/* Properties Panel */}
