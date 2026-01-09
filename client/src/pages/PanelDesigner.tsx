@@ -404,13 +404,15 @@ export default function PanelDesigner() {
     if (tool === "move") {
         // Step 0: Select object
         if (drawingStep === 0) {
-            // Check if clicked on a sketch line
+            // Check if clicked on a sketch line (use generous tolerance scaled by zoom)
+            const tolerance = Math.max(15, 30 / scale);
             const clickedLine = (activePanel.sketchLines || []).find(line => {
                 const dist = pointToLineDistance(x, y, line.x1, line.y1, line.x2, line.y2);
-                return dist < 10;
+                return dist < tolerance;
             });
             if (clickedLine) {
                 setMoveTarget({ type: 'line', id: clickedLine.id });
+                setSelectedSketchLineId(clickedLine.id);
                 setDrawingStep(1);
                 addToHistory("MOVE: Line selected. Specify base point:");
                 return;
@@ -420,16 +422,17 @@ export default function PanelDesigner() {
             const clickedOpening = activePanel.openings.find(op => {
                 const cx = op.x + op.width / 2;
                 const cy = op.y + op.height / 2;
-                return Math.abs(x - cx) < op.width / 2 + 5 && Math.abs(y - cy) < op.height / 2 + 5;
+                return Math.abs(x - cx) < op.width / 2 + tolerance && Math.abs(y - cy) < op.height / 2 + tolerance;
             });
             if (clickedOpening) {
                 setMoveTarget({ type: 'opening', id: clickedOpening.id });
+                setSelectedOpeningId(clickedOpening.id);
                 setDrawingStep(1);
                 addToHistory("MOVE: Opening selected. Specify base point:");
                 return;
             }
             
-            addToHistory("MOVE: Click on an object to select it");
+            addToHistory("MOVE: No object found at click location. Try clicking closer to a line or shape.");
         }
         // Step 1: Specify base point
         else if (drawingStep === 1) {
@@ -472,13 +475,15 @@ export default function PanelDesigner() {
     if (tool === "copy") {
         // Step 0: Select object
         if (drawingStep === 0) {
-            // Check if clicked on a sketch line
+            // Check if clicked on a sketch line (use generous tolerance scaled by zoom)
+            const tolerance = Math.max(15, 30 / scale);
             const clickedLine = (activePanel.sketchLines || []).find(line => {
                 const dist = pointToLineDistance(x, y, line.x1, line.y1, line.x2, line.y2);
-                return dist < 10;
+                return dist < tolerance;
             });
             if (clickedLine) {
                 setMoveTarget({ type: 'line', id: clickedLine.id });
+                setSelectedSketchLineId(clickedLine.id);
                 setDrawingStep(1);
                 addToHistory("COPY: Line selected. Specify base point:");
                 return;
@@ -488,16 +493,17 @@ export default function PanelDesigner() {
             const clickedOpening = activePanel.openings.find(op => {
                 const cx = op.x + op.width / 2;
                 const cy = op.y + op.height / 2;
-                return Math.abs(x - cx) < op.width / 2 + 5 && Math.abs(y - cy) < op.height / 2 + 5;
+                return Math.abs(x - cx) < op.width / 2 + tolerance && Math.abs(y - cy) < op.height / 2 + tolerance;
             });
             if (clickedOpening) {
                 setMoveTarget({ type: 'opening', id: clickedOpening.id });
+                setSelectedOpeningId(clickedOpening.id);
                 setDrawingStep(1);
                 addToHistory("COPY: Opening selected. Specify base point:");
                 return;
             }
             
-            addToHistory("COPY: Click on an object to select it");
+            addToHistory("COPY: No object found at click location. Try clicking closer to a line or shape.");
         }
         // Step 1: Specify base point
         else if (drawingStep === 1) {
