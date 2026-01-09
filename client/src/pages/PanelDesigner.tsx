@@ -12,7 +12,7 @@ import { calculateLoadCombinations } from "@/lib/calculations";
 import { 
   Plus, Trash2, ZoomIn, ZoomOut, MousePointer2, PenTool, 
   Square, Circle as CircleIcon, CornerUpLeft, GripHorizontal,
-  BoxSelect, Move, Ruler, Maximize, Minus, ArrowUpRight, 
+  BoxSelect, Move, Copy, Ruler, Maximize, Minus, ArrowUpRight, 
   CornerDownRight, Spline, Terminal
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -77,7 +77,7 @@ export default function PanelDesigner() {
   const [selectedSketchLineId, setSelectedSketchLineId] = useState<string | null>(null);
   
   const [scale, setScale] = useState(3);
-  const [tool, setTool] = useState<"select" | "vertex" | "rect_opening" | "circle_opening" | "connection" | "sketch_line" | "line" | "arc" | "offset" | "fillet">("select");
+  const [tool, setTool] = useState<"select" | "vertex" | "rect_opening" | "circle_opening" | "connection" | "sketch_line" | "line" | "arc" | "offset" | "fillet" | "move" | "copy">("select");
   const [isDragging, setIsDragging] = useState(false);
   
   // Drawing State (Click-Move-Click)
@@ -89,6 +89,10 @@ export default function PanelDesigner() {
   const [commandInput, setCommandInput] = useState("");
   const [commandHistory, setCommandHistory] = useState<string[]>(["Ready. Select a tool or type a command."]);
   const commandInputRef = useRef<HTMLInputElement>(null);
+  
+  // Move/Copy state
+  const [moveTarget, setMoveTarget] = useState<{type: 'line' | 'opening', id: string} | null>(null);
+  const [basePoint, setBasePoint] = useState<{x: number, y: number} | null>(null);
   
   // Helper: Convert screen Y to CAD Y (flip for origin bottom-left)
   const screenToCAD = (screenX: number, screenY: number) => ({
@@ -395,6 +399,171 @@ export default function PanelDesigner() {
         addToHistory("FILLET: Select a vertex in Vertex mode to apply fillet radius");
         return;
     }
+    
+    // MOVE tool
+    if (tool === "move") {
+        // Step 0: Select object
+        if (drawingStep === 0) {
+            // Check if clicked on a sketch line
+            const clickedLine = (activePanel.sketchLines || []).find(line => {
+                const dist = pointToLineDistance(x, y, line.x1, line.y1, line.x2, line.y2);
+                return dist < 10;
+            });
+            if (clickedLine) {
+                setMoveTarget({ type: 'line', id: clickedLine.id });
+                setDrawingStep(1);
+                addToHistory("MOVE: Line selected. Specify base point:");
+                return;
+            }
+            
+            // Check if clicked on an opening
+            const clickedOpening = activePanel.openings.find(op => {
+                const cx = op.x + op.width / 2;
+                const cy = op.y + op.height / 2;
+                return Math.abs(x - cx) < op.width / 2 + 5 && Math.abs(y - cy) < op.height / 2 + 5;
+            });
+            if (clickedOpening) {
+                setMoveTarget({ type: 'opening', id: clickedOpening.id });
+                setDrawingStep(1);
+                addToHistory("MOVE: Opening selected. Specify base point:");
+                return;
+            }
+            
+            addToHistory("MOVE: Click on an object to select it");
+        }
+        // Step 1: Specify base point
+        else if (drawingStep === 1) {
+            setBasePoint({ x, y });
+            setDrawingStep(2);
+            addToHistory(`MOVE: Base point: (${x}, ${y}). Specify destination point:`);
+        }
+        // Step 2: Specify destination point and move
+        else if (drawingStep === 2 && moveTarget && basePoint) {
+            const dx = x - basePoint.x;
+            const dy = y - basePoint.y;
+            
+            if (moveTarget.type === 'line') {
+                const newLines = (activePanel.sketchLines || []).map(line => 
+                    line.id === moveTarget.id 
+                        ? { ...line, x1: line.x1 + dx, y1: line.y1 + dy, x2: line.x2 + dx, y2: line.y2 + dy }
+                        : line
+                );
+                updatePanel({ ...activePanel, sketchLines: newLines });
+                addToHistory(`MOVE: Line moved by (${dx}, ${dy})`);
+            } else if (moveTarget.type === 'opening') {
+                const newOpenings = activePanel.openings.map(op =>
+                    op.id === moveTarget.id
+                        ? { ...op, x: op.x + dx, y: op.y + dy }
+                        : op
+                );
+                updatePanel({ ...activePanel, openings: newOpenings });
+                addToHistory(`MOVE: Opening moved by (${dx}, ${dy})`);
+            }
+            
+            setDrawingStep(0);
+            setMoveTarget(null);
+            setBasePoint(null);
+            setTool("select");
+        }
+        return;
+    }
+    
+    // COPY tool
+    if (tool === "copy") {
+        // Step 0: Select object
+        if (drawingStep === 0) {
+            // Check if clicked on a sketch line
+            const clickedLine = (activePanel.sketchLines || []).find(line => {
+                const dist = pointToLineDistance(x, y, line.x1, line.y1, line.x2, line.y2);
+                return dist < 10;
+            });
+            if (clickedLine) {
+                setMoveTarget({ type: 'line', id: clickedLine.id });
+                setDrawingStep(1);
+                addToHistory("COPY: Line selected. Specify base point:");
+                return;
+            }
+            
+            // Check if clicked on an opening
+            const clickedOpening = activePanel.openings.find(op => {
+                const cx = op.x + op.width / 2;
+                const cy = op.y + op.height / 2;
+                return Math.abs(x - cx) < op.width / 2 + 5 && Math.abs(y - cy) < op.height / 2 + 5;
+            });
+            if (clickedOpening) {
+                setMoveTarget({ type: 'opening', id: clickedOpening.id });
+                setDrawingStep(1);
+                addToHistory("COPY: Opening selected. Specify base point:");
+                return;
+            }
+            
+            addToHistory("COPY: Click on an object to select it");
+        }
+        // Step 1: Specify base point
+        else if (drawingStep === 1) {
+            setBasePoint({ x, y });
+            setDrawingStep(2);
+            addToHistory(`COPY: Base point: (${x}, ${y}). Specify destination point:`);
+        }
+        // Step 2: Specify destination point and create copy
+        else if (drawingStep === 2 && moveTarget && basePoint) {
+            const dx = x - basePoint.x;
+            const dy = y - basePoint.y;
+            
+            if (moveTarget.type === 'line') {
+                const origLine = (activePanel.sketchLines || []).find(l => l.id === moveTarget.id);
+                if (origLine) {
+                    const newLine: SketchLine = {
+                        id: crypto.randomUUID(),
+                        x1: origLine.x1 + dx,
+                        y1: origLine.y1 + dy,
+                        x2: origLine.x2 + dx,
+                        y2: origLine.y2 + dy
+                    };
+                    updatePanel({ ...activePanel, sketchLines: [...(activePanel.sketchLines || []), newLine] });
+                    addToHistory(`COPY: Line copied to (${dx}, ${dy}) offset`);
+                }
+            } else if (moveTarget.type === 'opening') {
+                const origOp = activePanel.openings.find(op => op.id === moveTarget.id);
+                if (origOp) {
+                    const newOpening: Opening = {
+                        id: crypto.randomUUID(),
+                        type: origOp.type,
+                        x: origOp.x + dx,
+                        y: origOp.y + dy,
+                        width: origOp.width,
+                        height: origOp.height
+                    };
+                    updatePanel({ ...activePanel, openings: [...activePanel.openings, newOpening] });
+                    addToHistory(`COPY: Opening copied to (${dx}, ${dy}) offset`);
+                }
+            }
+            
+            // Stay in copy mode for multiple copies
+            setBasePoint({ x, y });
+            addToHistory("COPY: Specify next destination point or ESC to finish:");
+        }
+        return;
+    }
+  };
+  
+  // Helper function for point-to-line distance
+  const pointToLineDistance = (px: number, py: number, x1: number, y1: number, x2: number, y2: number) => {
+    const A = px - x1;
+    const B = py - y1;
+    const C = x2 - x1;
+    const D = y2 - y1;
+    const dot = A * C + B * D;
+    const lenSq = C * C + D * D;
+    let param = -1;
+    if (lenSq !== 0) param = dot / lenSq;
+    
+    let xx, yy;
+    if (param < 0) { xx = x1; yy = y1; }
+    else if (param > 1) { xx = x2; yy = y2; }
+    else { xx = x1 + param * C; yy = y1 + param * D; }
+    
+    return Math.sqrt((px - xx) * (px - xx) + (py - yy) * (py - yy));
   };
   
   // Handle command line input
@@ -428,6 +597,20 @@ export default function PanelDesigner() {
         case "F":
         case "FILLET":
             setTool("fillet");
+            break;
+        case "M":
+        case "MOVE":
+            setTool("move");
+            setDrawingStep(0);
+            setDrawingPoints([]);
+            addToHistory("MOVE: Select object to move (click on line, circle, or opening)");
+            break;
+        case "CO":
+        case "COPY":
+            setTool("copy");
+            setDrawingStep(0);
+            setDrawingPoints([]);
+            addToHistory("COPY: Select object to copy (click on line, circle, or opening)");
             break;
         case "ESC":
         case "CANCEL":
@@ -492,6 +675,12 @@ export default function PanelDesigner() {
                 </ToggleGroupItem>
                 <ToggleGroupItem value="fillet" aria-label="Fillet" title="Fillet (F)">
                     <CornerDownRight className="w-4 h-4" />
+                </ToggleGroupItem>
+                <ToggleGroupItem value="move" aria-label="Move" title="Move (M)">
+                    <Move className="w-4 h-4" />
+                </ToggleGroupItem>
+                <ToggleGroupItem value="copy" aria-label="Copy" title="Copy (CO)">
+                    <Copy className="w-4 h-4" />
                 </ToggleGroupItem>
                 <ToggleGroupItem value="connection" aria-label="Add Connection" title="Add Connection Point">
                     <BoxSelect className="w-4 h-4" />
