@@ -416,37 +416,13 @@ export default function PanelDesigner() {
     
     // MOVE tool
     if (tool === "move") {
-        // Step 0: Select object
+        // Step 0: Select object - let child elements handle their own clicks
         if (drawingStep === 0) {
-            // Check if clicked on a sketch line (use generous tolerance scaled by zoom)
-            const tolerance = Math.max(15, 30 / scale);
-            const clickedLine = (activePanel.sketchLines || []).find(line => {
-                const dist = pointToLineDistance(x, y, line.x1, line.y1, line.x2, line.y2);
-                return dist < tolerance;
-            });
-            if (clickedLine) {
-                setMoveTarget({ type: 'line', id: clickedLine.id });
-                setSelectedSketchLineId(clickedLine.id);
-                setDrawingStep(1);
-                addToHistory("MOVE: Line selected. Specify base point:");
+            // If clicked on a child element (Line, Rect, etc.), let its onClick handle selection
+            if (!clickedOnEmpty) {
                 return;
             }
-            
-            // Check if clicked on an opening
-            const clickedOpening = activePanel.openings.find(op => {
-                const cx = op.x + op.width / 2;
-                const cy = op.y + op.height / 2;
-                return Math.abs(x - cx) < op.width / 2 + tolerance && Math.abs(y - cy) < op.height / 2 + tolerance;
-            });
-            if (clickedOpening) {
-                setMoveTarget({ type: 'opening', id: clickedOpening.id });
-                setSelectedOpeningId(clickedOpening.id);
-                setDrawingStep(1);
-                addToHistory("MOVE: Opening selected. Specify base point:");
-                return;
-            }
-            
-            addToHistory("MOVE: No object found at click location. Try clicking closer to a line or shape.");
+            addToHistory("MOVE: Click on a line or shape to select it.");
         }
         // Step 1: Specify base point
         else if (drawingStep === 1) {
@@ -487,37 +463,13 @@ export default function PanelDesigner() {
     
     // COPY tool
     if (tool === "copy") {
-        // Step 0: Select object
+        // Step 0: Select object - let child elements handle their own clicks
         if (drawingStep === 0) {
-            // Check if clicked on a sketch line (use generous tolerance scaled by zoom)
-            const tolerance = Math.max(15, 30 / scale);
-            const clickedLine = (activePanel.sketchLines || []).find(line => {
-                const dist = pointToLineDistance(x, y, line.x1, line.y1, line.x2, line.y2);
-                return dist < tolerance;
-            });
-            if (clickedLine) {
-                setMoveTarget({ type: 'line', id: clickedLine.id });
-                setSelectedSketchLineId(clickedLine.id);
-                setDrawingStep(1);
-                addToHistory("COPY: Line selected. Specify base point:");
+            // If clicked on a child element (Line, Rect, etc.), let its onClick handle selection
+            if (!clickedOnEmpty) {
                 return;
             }
-            
-            // Check if clicked on an opening
-            const clickedOpening = activePanel.openings.find(op => {
-                const cx = op.x + op.width / 2;
-                const cy = op.y + op.height / 2;
-                return Math.abs(x - cx) < op.width / 2 + tolerance && Math.abs(y - cy) < op.height / 2 + tolerance;
-            });
-            if (clickedOpening) {
-                setMoveTarget({ type: 'opening', id: clickedOpening.id });
-                setSelectedOpeningId(clickedOpening.id);
-                setDrawingStep(1);
-                addToHistory("COPY: Opening selected. Specify base point:");
-                return;
-            }
-            
-            addToHistory("COPY: No object found at click location. Try clicking closer to a line or shape.");
+            addToHistory("COPY: Click on a line or shape to select it.");
         }
         // Step 1: Specify base point
         else if (drawingStep === 1) {
