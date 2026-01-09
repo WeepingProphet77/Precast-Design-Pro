@@ -828,6 +828,21 @@ export default function PanelDesigner() {
                                         key={line.id}
                                         onClick={(e) => {
                                             e.cancelBubble = true;
+                                            // Handle selection for move/copy tools
+                                            if (tool === "move" && drawingStep === 0) {
+                                                setMoveTarget({ type: 'line', id: line.id });
+                                                setSelectedSketchLineId(line.id);
+                                                setDrawingStep(1);
+                                                addToHistory("MOVE: Line selected. Specify base point:");
+                                                return;
+                                            }
+                                            if (tool === "copy" && drawingStep === 0) {
+                                                setMoveTarget({ type: 'line', id: line.id });
+                                                setSelectedSketchLineId(line.id);
+                                                setDrawingStep(1);
+                                                addToHistory("COPY: Line selected. Specify base point:");
+                                                return;
+                                            }
                                             setSelectedSketchLineId(line.id);
                                             setSelectedConnectionId(null);
                                             setSelectedOpeningId(null);
@@ -839,6 +854,7 @@ export default function PanelDesigner() {
                                             stroke={selectedSketchLineId === line.id ? "#E74C3C" : "#95A5A6"}
                                             strokeWidth={2}
                                             dash={[5, 5]}
+                                            hitStrokeWidth={20}
                                         />
                                         {/* Dimension Label */}
                                         <Rect
@@ -1023,6 +1039,21 @@ export default function PanelDesigner() {
                                     }}
                                     onClick={(e) => {
                                         e.cancelBubble = true;
+                                        // Handle selection for move/copy tools
+                                        if (tool === "move" && drawingStep === 0) {
+                                            setMoveTarget({ type: 'opening', id: op.id });
+                                            setSelectedOpeningId(op.id);
+                                            setDrawingStep(1);
+                                            addToHistory("MOVE: Opening selected. Specify base point:");
+                                            return;
+                                        }
+                                        if (tool === "copy" && drawingStep === 0) {
+                                            setMoveTarget({ type: 'opening', id: op.id });
+                                            setSelectedOpeningId(op.id);
+                                            setDrawingStep(1);
+                                            addToHistory("COPY: Opening selected. Specify base point:");
+                                            return;
+                                        }
                                         setSelectedOpeningId(op.id);
                                         setSelectedConnectionId(null);
                                         setSelectedSketchLineId(null);
@@ -1034,10 +1065,11 @@ export default function PanelDesigner() {
                                         <Rect
                                             width={op.width * scale}
                                             height={op.height * scale}
-                                            fill="#e2e8f0" // slightly darker than bg to look like hole, or white
+                                            fill="#e2e8f0"
                                             stroke={selectedOpeningId === op.id ? "#3498DB" : "#94a3b8"}
                                             strokeWidth={1}
                                             strokeDash={[4, 4]}
+                                            hitStrokeWidth={15}
                                         />
                                     ) : (
                                         <Circle
@@ -1046,7 +1078,8 @@ export default function PanelDesigner() {
                                             stroke={selectedOpeningId === op.id ? "#3498DB" : "#94a3b8"}
                                             strokeWidth={1}
                                             strokeDash={[4, 4]}
-                                            offset={{ x: -(op.width/2)*scale, y: -(op.height/2)*scale }} // center correction for circle group pos
+                                            offset={{ x: -(op.width/2)*scale, y: -(op.height/2)*scale }}
+                                            hitStrokeWidth={15}
                                         />
                                     )}
                                     {/* Dimensions text for opening */}
@@ -1149,12 +1182,14 @@ export default function PanelDesigner() {
           
           {/* Command Line */}
           <div className="h-32 border-t bg-slate-900 text-white font-mono text-sm flex flex-col">
-            <ScrollArea className="flex-1 p-2">
-              {commandHistory.map((line, i) => (
-                <div key={i} className={`${line.startsWith('>') ? 'text-yellow-400' : 'text-slate-300'}`}>
-                  {line}
-                </div>
-              ))}
+            <ScrollArea className="flex-1 p-2 flex flex-col-reverse">
+              <div className="flex flex-col-reverse">
+                {[...commandHistory].reverse().map((line, i) => (
+                  <div key={i} className={`${line.startsWith('>') ? 'text-yellow-400' : 'text-slate-300'}`}>
+                    {line}
+                  </div>
+                ))}
+              </div>
             </ScrollArea>
             <div className="flex items-center border-t border-slate-700 px-2">
               <span className="text-green-400 mr-2">Command:</span>
