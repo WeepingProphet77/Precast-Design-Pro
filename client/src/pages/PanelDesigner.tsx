@@ -178,7 +178,21 @@ export default function PanelDesigner() {
     return () => window.removeEventListener("keydown", handleEscape);
   }, []);
 
-  if (!activePanel) return <div className="p-8">Loading...</div>;
+  // Empty state - no panels yet
+  if (!activePanel) {
+    return (
+      <div className="flex-1 flex items-center justify-center bg-slate-100">
+        <div className="text-center">
+          <h2 className="text-xl font-semibold text-slate-700 mb-4">No Panels</h2>
+          <p className="text-slate-500 mb-6">Create a panel to start designing</p>
+          <Button onClick={addPanel}>
+            <Plus className="w-4 h-4 mr-2" />
+            Create Panel
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   const canvasPadding = 100;
 
