@@ -107,25 +107,7 @@ export const createDefaultProject = (): ProjectData => ({
     location: "",
     date: new Date().toISOString().split("T")[0],
   },
-  panels: [
-    {
-      id: "1",
-      name: "P-01",
-      description: "Standard Cladding Panel",
-      width: 120,
-      height: 180,
-      thickness: 6,
-      perimeter: [
-        { id: "v1", x: 0, y: 0 },
-        { id: "v2", x: 120, y: 0 },
-        { id: "v3", x: 120, y: 180 },
-        { id: "v4", x: 0, y: 180 },
-      ],
-      openings: [],
-      sketchLines: [],
-      connections: [],
-    },
-  ],
+  panels: [],
   capacities: [
     { type: "A", capacityX: 5000, capacityY: 10000, capacityZ: 5000 },
     { type: "B", capacityX: 8000, capacityY: 15000, capacityZ: 8000 },
