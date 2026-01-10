@@ -93,18 +93,71 @@ export default function PanelDesigner() {
   // Move/Copy state
   const [moveTarget, setMoveTarget] = useState<{type: 'line' | 'opening', id: string} | null>(null);
   const [basePoint, setBasePoint] = useState<{x: number, y: number} | null>(null);
+  const [shiftPressed, setShiftPressed] = useState(false);
+  
+  // Canvas size - large unbounded workspace
+  const canvasSize = 800;
   
   // Helper: Convert screen Y to CAD Y (flip for origin bottom-left)
   const screenToCAD = (screenX: number, screenY: number) => ({
     x: Math.round(screenX),
-    y: Math.round(activePanel ? activePanel.height - screenY : screenY)
+    y: Math.round(canvasSize - screenY)
   });
   
   // Helper: Convert CAD Y to screen Y
   const cadToScreen = (cadX: number, cadY: number) => ({
     x: cadX,
-    y: activePanel ? activePanel.height - cadY : cadY
+    y: canvasSize - cadY
   });
+  
+  // Get all existing endpoints for snapping
+  const getAllEndpoints = () => {
+    const points: {x: number, y: number}[] = [];
+    (activePanel?.sketchLines || []).forEach(line => {
+      points.push({ x: line.x1, y: line.y1 });
+      points.push({ x: line.x2, y: line.y2 });
+    });
+    return points;
+  };
+  
+  // Snap to nearest endpoint if within tolerance
+  const snapToEndpoint = (x: number, y: number, tolerance: number = 10) => {
+    const endpoints = getAllEndpoints();
+    let closest = { x, y };
+    let minDist = tolerance;
+    
+    for (const pt of endpoints) {
+      const dist = Math.sqrt(Math.pow(pt.x - x, 2) + Math.pow(pt.y - y, 2));
+      if (dist < minDist) {
+        minDist = dist;
+        closest = pt;
+      }
+    }
+    return closest;
+  };
+  
+  // Snap angle to 45-degree increments when shift is held
+  const snapAngle = (fromX: number, fromY: number, toX: number, toY: number) => {
+    const dx = toX - fromX;
+    const dy = toY - fromY;
+    const length = Math.sqrt(dx * dx + dy * dy);
+    
+    if (length === 0) return { x: toX, y: toY };
+    
+    // Get angle in degrees
+    let angle = Math.atan2(dy, dx) * 180 / Math.PI;
+    
+    // Snap to nearest 45-degree increment
+    const snapAngleIncrement = 45;
+    angle = Math.round(angle / snapAngleIncrement) * snapAngleIncrement;
+    
+    // Convert back to coordinates
+    const radians = angle * Math.PI / 180;
+    return {
+      x: Math.round(fromX + length * Math.cos(radians)),
+      y: Math.round(fromY + length * Math.sin(radians))
+    };
+  };
   
   const addToHistory = (msg: string) => {
     setCommandHistory(prev => [...prev.slice(-20), msg]);
@@ -165,17 +218,29 @@ export default function PanelDesigner() {
     addToHistory(`Tool: ${tool.toUpperCase()}`);
   }, [tool]);
   
-  // Handle Escape key to cancel current operation
+  // Handle Escape key to cancel current operation + Shift key tracking
   useEffect(() => {
-    const handleEscape = (e: KeyboardEvent) => {
+    const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setDrawingStep(0);
         setDrawingPoints([]);
         addToHistory("Command cancelled.");
       }
+      if (e.key === "Shift") {
+        setShiftPressed(true);
+      }
     };
-    window.addEventListener("keydown", handleEscape);
-    return () => window.removeEventListener("keydown", handleEscape);
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "Shift") {
+        setShiftPressed(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
   }, []);
 
   // Empty state - no panels yet
@@ -255,25 +320,36 @@ export default function PanelDesigner() {
         return;
     }
 
-    // LINE tool - AutoCAD style continuous polyline
+    // LINE tool - AutoCAD style continuous polyline with snapping
     if (tool === "line" || tool === "sketch_line") {
+        // First try endpoint snap
+        let snappedPt = snapToEndpoint(x, y, 15);
+        
         if (drawingStep === 0) {
             setDrawingStep(1);
-            setDrawingPoints([{ x, y }]);
-            addToHistory(`LINE: Specify first point: (${x}, ${y})`);
+            setDrawingPoints([snappedPt]);
+            const snapNote = (snappedPt.x !== x || snappedPt.y !== y) ? " (snapped)" : "";
+            addToHistory(`LINE: First point: (${snappedPt.x}, ${snappedPt.y})${snapNote}`);
         } else {
             const lastPt = drawingPoints[drawingPoints.length - 1];
+            
+            // Apply angle snap if shift is held
+            if (shiftPressed) {
+                snappedPt = snapAngle(lastPt.x, lastPt.y, snappedPt.x, snappedPt.y);
+            }
+            
             const newLine: SketchLine = {
                 id: crypto.randomUUID(),
                 x1: lastPt.x,
                 y1: lastPt.y,
-                x2: x,
-                y2: y
+                x2: snappedPt.x,
+                y2: snappedPt.y
             };
             updatePanel({ ...activePanel, sketchLines: [...(activePanel.sketchLines || []), newLine] });
-            setDrawingPoints([...drawingPoints, { x, y }]);
-            const len = Math.sqrt(Math.pow(x - lastPt.x, 2) + Math.pow(y - lastPt.y, 2));
-            addToHistory(`LINE: To (${x}, ${y}), Length: ${len.toFixed(2)}"`);
+            setDrawingPoints([...drawingPoints, snappedPt]);
+            const len = Math.sqrt(Math.pow(snappedPt.x - lastPt.x, 2) + Math.pow(snappedPt.y - lastPt.y, 2));
+            const angleNote = shiftPressed ? " (angle snapped)" : "";
+            addToHistory(`LINE: To (${snappedPt.x}, ${snappedPt.y}), Length: ${len.toFixed(1)}"${angleNote}`);
         }
         return;
     }
@@ -733,8 +809,8 @@ export default function PanelDesigner() {
                 }}
              >
                  <Stage 
-                    width={activePanel.width * scale + canvasPadding * 2} 
-                    height={activePanel.height * scale + canvasPadding * 2}
+                    width={canvasSize * scale + canvasPadding * 2} 
+                    height={canvasSize * scale + canvasPadding * 2}
                     onClick={handleStageClick}
                     onMouseMove={handleStageMouseMove}
                  >
