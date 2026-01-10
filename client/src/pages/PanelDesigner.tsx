@@ -780,72 +780,58 @@ export default function PanelDesigner() {
                                 );
                             })}
 
-                            {/* Sketch Lines (Y-flipped) */}
+                            {/* Sketch Lines (Y-flipped) - Simple Lines */}
                             {(activePanel.sketchLines || []).map((line) => {
-                                const dx = line.x2 - line.x1;
-                                const dy = line.y2 - line.y1;
-                                const length = Math.sqrt(dx * dx + dy * dy).toFixed(1);
                                 const p1 = cadToScreen(line.x1, line.y1);
                                 const p2 = cadToScreen(line.x2, line.y2);
-                                const midScreen = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
-                                
-                                const handleLineClick = (e: any) => {
-                                    e.cancelBubble = true;
-                                    // Handle selection for move/copy tools
-                                    if (tool === "move" && drawingStep === 0) {
-                                        setMoveTarget({ type: 'line', id: line.id });
-                                        setSelectedSketchLineId(line.id);
-                                        setDrawingStep(1);
-                                        addToHistory("MOVE: Line selected. Specify base point:");
-                                        return;
-                                    }
-                                    if (tool === "copy" && drawingStep === 0) {
-                                        setMoveTarget({ type: 'line', id: line.id });
-                                        setSelectedSketchLineId(line.id);
-                                        setDrawingStep(1);
-                                        addToHistory("COPY: Line selected. Specify base point:");
-                                        return;
-                                    }
-                                    setSelectedSketchLineId(line.id);
-                                    setSelectedConnectionId(null);
-                                    setSelectedOpeningId(null);
-                                    setSelectedVertexId(null);
-                                };
                                 
                                 return (
-                                    <Group key={line.id}>
-                                        <Line
-                                            points={[p1.x * scale, p1.y * scale, p2.x * scale, p2.y * scale]}
-                                            stroke={selectedSketchLineId === line.id ? "#E74C3C" : "#95A5A6"}
-                                            strokeWidth={2}
-                                            dash={[5, 5]}
-                                            hitStrokeWidth={30}
-                                            onClick={handleLineClick}
-                                            onTap={handleLineClick}
-                                        />
-                                        {/* Dimension Label */}
-                                        <Rect
-                                             x={midScreen.x * scale - 20}
-                                             y={midScreen.y * scale - 10}
-                                             width={40}
-                                             height={20}
-                                             fill="white"
-                                             opacity={0.8}
-                                             cornerRadius={4}
-                                             onClick={handleLineClick}
-                                        />
-                                        <Text
-                                            x={midScreen.x * scale - 20}
-                                            y={midScreen.y * scale - 5}
-                                            width={40}
-                                            text={`${length}"`}
-                                            fontSize={12}
-                                            fontFamily="Roboto Mono"
-                                            fill="#2C3E50"
-                                            align="center"
-                                            onClick={handleLineClick}
-                                        />
-                                    </Group>
+                                    <Line
+                                        key={line.id}
+                                        points={[p1.x * scale, p1.y * scale, p2.x * scale, p2.y * scale]}
+                                        stroke={selectedSketchLineId === line.id ? "#E74C3C" : "#2C3E50"}
+                                        strokeWidth={selectedSketchLineId === line.id ? 3 : 2}
+                                        hitStrokeWidth={30}
+                                        onClick={(e) => {
+                                            e.cancelBubble = true;
+                                            if (tool === "move" && drawingStep === 0) {
+                                                setMoveTarget({ type: 'line', id: line.id });
+                                                setSelectedSketchLineId(line.id);
+                                                setDrawingStep(1);
+                                                addToHistory("MOVE: Line selected. Specify base point:");
+                                                return;
+                                            }
+                                            if (tool === "copy" && drawingStep === 0) {
+                                                setMoveTarget({ type: 'line', id: line.id });
+                                                setSelectedSketchLineId(line.id);
+                                                setDrawingStep(1);
+                                                addToHistory("COPY: Line selected. Specify base point:");
+                                                return;
+                                            }
+                                            setSelectedSketchLineId(line.id);
+                                            setSelectedConnectionId(null);
+                                            setSelectedOpeningId(null);
+                                            setSelectedVertexId(null);
+                                        }}
+                                        onTap={(e) => {
+                                            e.cancelBubble = true;
+                                            if (tool === "move" && drawingStep === 0) {
+                                                setMoveTarget({ type: 'line', id: line.id });
+                                                setSelectedSketchLineId(line.id);
+                                                setDrawingStep(1);
+                                                addToHistory("MOVE: Line selected. Specify base point:");
+                                                return;
+                                            }
+                                            if (tool === "copy" && drawingStep === 0) {
+                                                setMoveTarget({ type: 'line', id: line.id });
+                                                setSelectedSketchLineId(line.id);
+                                                setDrawingStep(1);
+                                                addToHistory("COPY: Line selected. Specify base point:");
+                                                return;
+                                            }
+                                            setSelectedSketchLineId(line.id);
+                                        }}
+                                    />
                                 );
                             })}
                             
