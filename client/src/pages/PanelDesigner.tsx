@@ -789,38 +789,39 @@ export default function PanelDesigner() {
                                 const p2 = cadToScreen(line.x2, line.y2);
                                 const midScreen = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
                                 
+                                const handleLineClick = (e: any) => {
+                                    e.cancelBubble = true;
+                                    // Handle selection for move/copy tools
+                                    if (tool === "move" && drawingStep === 0) {
+                                        setMoveTarget({ type: 'line', id: line.id });
+                                        setSelectedSketchLineId(line.id);
+                                        setDrawingStep(1);
+                                        addToHistory("MOVE: Line selected. Specify base point:");
+                                        return;
+                                    }
+                                    if (tool === "copy" && drawingStep === 0) {
+                                        setMoveTarget({ type: 'line', id: line.id });
+                                        setSelectedSketchLineId(line.id);
+                                        setDrawingStep(1);
+                                        addToHistory("COPY: Line selected. Specify base point:");
+                                        return;
+                                    }
+                                    setSelectedSketchLineId(line.id);
+                                    setSelectedConnectionId(null);
+                                    setSelectedOpeningId(null);
+                                    setSelectedVertexId(null);
+                                };
+                                
                                 return (
-                                    <Group 
-                                        key={line.id}
-                                        onClick={(e) => {
-                                            e.cancelBubble = true;
-                                            // Handle selection for move/copy tools
-                                            if (tool === "move" && drawingStep === 0) {
-                                                setMoveTarget({ type: 'line', id: line.id });
-                                                setSelectedSketchLineId(line.id);
-                                                setDrawingStep(1);
-                                                addToHistory("MOVE: Line selected. Specify base point:");
-                                                return;
-                                            }
-                                            if (tool === "copy" && drawingStep === 0) {
-                                                setMoveTarget({ type: 'line', id: line.id });
-                                                setSelectedSketchLineId(line.id);
-                                                setDrawingStep(1);
-                                                addToHistory("COPY: Line selected. Specify base point:");
-                                                return;
-                                            }
-                                            setSelectedSketchLineId(line.id);
-                                            setSelectedConnectionId(null);
-                                            setSelectedOpeningId(null);
-                                            setSelectedVertexId(null);
-                                        }}
-                                    >
+                                    <Group key={line.id}>
                                         <Line
                                             points={[p1.x * scale, p1.y * scale, p2.x * scale, p2.y * scale]}
                                             stroke={selectedSketchLineId === line.id ? "#E74C3C" : "#95A5A6"}
                                             strokeWidth={2}
                                             dash={[5, 5]}
-                                            hitStrokeWidth={20}
+                                            hitStrokeWidth={30}
+                                            onClick={handleLineClick}
+                                            onTap={handleLineClick}
                                         />
                                         {/* Dimension Label */}
                                         <Rect
@@ -831,6 +832,7 @@ export default function PanelDesigner() {
                                              fill="white"
                                              opacity={0.8}
                                              cornerRadius={4}
+                                             onClick={handleLineClick}
                                         />
                                         <Text
                                             x={midScreen.x * scale - 20}
@@ -841,6 +843,7 @@ export default function PanelDesigner() {
                                             fontFamily="Roboto Mono"
                                             fill="#2C3E50"
                                             align="center"
+                                            onClick={handleLineClick}
                                         />
                                     </Group>
                                 );
