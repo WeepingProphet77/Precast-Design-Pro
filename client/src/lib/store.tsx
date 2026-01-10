@@ -38,12 +38,7 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
       width: 120,
       height: 180,
       thickness: 6,
-      perimeter: [
-        { id: crypto.randomUUID(), x: 0, y: 0 },
-        { id: crypto.randomUUID(), x: 120, y: 0 },
-        { id: crypto.randomUUID(), x: 120, y: 180 },
-        { id: crypto.randomUUID(), x: 0, y: 180 },
-      ],
+      perimeter: [],
       openings: [],
       sketchLines: [],
       connections: [],
