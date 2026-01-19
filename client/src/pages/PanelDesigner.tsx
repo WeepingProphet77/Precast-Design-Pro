@@ -137,8 +137,23 @@ export default function PanelDesigner() {
     }
     if (tool === "connection") {
         const id = crypto.randomUUID();
-        addConnection(activePanel.id, { id, label: `C-${activePanel.connections.length + 1}`, type: "A", x, y, forces: { D:{x:0,y:0,z:0}, L:{x:0,y:0,z:0}, W:{x:0,y:0,z:0}, E:{x:0,y:0,z:0} } });
-        setSelectedConnectionId(id); setTool("select"); return;
+        const connection: ConnectionNode = { 
+            id, 
+            label: `C-${activePanel.connections.length + 1}`, 
+            type: "A", 
+            x, 
+            y, 
+            forces: { 
+                D:{x:0,y:0,z:0}, 
+                L:{x:0,y:0,z:0}, 
+                W:{x:0,y:0,z:0}, 
+                E:{x:0,y:0,z:0} 
+            } 
+        };
+        addConnection(activePanel.id, connection);
+        setSelectedConnectionId(id); 
+        setTool("select"); 
+        return; 
     }
     if (tool === "line") {
         let pt = snapToEndpoint(x, y, 15);
@@ -183,7 +198,9 @@ export default function PanelDesigner() {
 
   const onWheel = (e: any) => {
         if (e.evt) e.evt.preventDefault();
-        const stage = e.target.getStage(), oldScale = stage.scaleX(), ptr = stage.getPointerPosition(); 
+        const stage = e.currentTarget.getStage();
+        if (!stage) return;
+        const oldScale = stage.scaleX(), ptr = stage.getPointerPosition(); 
         if (!ptr) return;
         const pt = { x: (ptr.x - stage.x()) / oldScale, y: (ptr.y - stage.y()) / oldScale };
         const delta = e.evt ? e.evt.deltaY : 0;
@@ -198,7 +215,13 @@ export default function PanelDesigner() {
       <div className="h-16 border-b bg-card flex items-center px-4 gap-4 justify-between shrink-0 shadow-sm z-10">
         <div className="flex items-center gap-3">
             <Select value={activePanelId} onValueChange={setActivePanelId}><SelectTrigger className="w-[180px] h-9"><SelectValue placeholder="Select Panel" /></SelectTrigger><SelectContent>{project.panels.map(p => (<SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>))}</SelectContent></Select>
-            <ResizePanelDialog panel={activePanel} onUpdate={updatePanel} />
+            <ResizePanelDialog 
+                panel={activePanel} 
+                onResize={(w, h) => {
+                    updatePanel({ ...activePanel, width: w, height: h });
+                }} 
+                trigger={<Button variant="outline" size="sm" className="h-9"><Plus className="w-4 h-4 mr-2" /> Resize</Button>}
+            />
             <Button variant="outline" size="sm" onClick={addPanel} className="h-9"><Plus className="w-4 h-4 mr-2" /> New</Button>
         </div>
         <div className="flex items-center gap-1 bg-muted/30 p-1 rounded-md">
@@ -321,14 +344,14 @@ function ConnectionProperties({ panelId, connectionId }: { panelId: string, conn
                 <TabsContent value="load_combos" className="p-4 m-0">
                     <div className="space-y-4">
                         {(() => {
-                            const results = calculateLoadCombinations(connection.forces);
-                            return results.map((result, i) => (
+                            const results = calculateLoadCombinations(connection as any);
+                            return results.map((result: any, i) => (
                                 <div key={i} className="p-3 bg-muted/20 rounded border border-border/50 space-y-2">
-                                    <div className="text-[10px] font-mono text-muted-foreground truncate">{result.combination}</div>
+                                    <div className="text-[10px] font-mono text-muted-foreground truncate">{result.comboName}</div>
                                     <div className="grid grid-cols-3 gap-2">
-                                        <div className="text-center"><div className="text-[10px] uppercase">Pu,x</div><div className="text-sm font-mono font-bold">{result.factored.x.toFixed(1)}k</div></div>
-                                        <div className="text-center border-x"><div className="text-[10px] uppercase">Pu,y</div><div className="text-sm font-mono font-bold">{result.factored.y.toFixed(1)}k</div></div>
-                                        <div className="text-center"><div className="text-[10px] uppercase">Pu,z</div><div className="text-sm font-mono font-bold">{result.factored.z.toFixed(1)}k</div></div>
+                                        <div className="text-center"><div className="text-[10px] uppercase">Pu,x</div><div className="text-sm font-mono font-bold">{result.fx.toFixed(1)}k</div></div>
+                                        <div className="text-center border-x"><div className="text-[10px] uppercase">Pu,y</div><div className="text-sm font-mono font-bold">{result.fy.toFixed(1)}k</div></div>
+                                        <div className="text-center"><div className="text-[10px] uppercase">Pu,z</div><div className="text-sm font-mono font-bold">{result.fz.toFixed(1)}k</div></div>
                                     </div>
                                 </div>
                             ));
