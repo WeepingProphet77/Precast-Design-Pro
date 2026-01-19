@@ -29,6 +29,7 @@ const getRoundedPolygonPath = (vertices: Vertex[]) => {
 
 export default function PanelDesigner() {
   const { project, updatePanel, addPanel, updateConnection, addConnection, deleteConnection } = useProject();
+  const stageRef = useRef<any>(null);
   const [activePanelId, setActivePanelId] = useState<string>(project.panels[0]?.id || "");
   const [activePanel, setActivePanel] = useState<Panel | undefined>(undefined);
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
@@ -195,8 +196,6 @@ export default function PanelDesigner() {
         return;
     }
   };
-
-  const stageRef = useRef<any>(null);
 
   const onWheel = (e: any) => {
         if (e.evt) e.evt.preventDefault();
