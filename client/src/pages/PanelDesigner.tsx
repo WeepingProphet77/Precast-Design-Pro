@@ -196,9 +196,11 @@ export default function PanelDesigner() {
     }
   };
 
+  const stageRef = useRef<any>(null);
+
   const onWheel = (e: any) => {
         if (e.evt) e.evt.preventDefault();
-        const stage = e.currentTarget.getStage();
+        const stage = stageRef.current;
         if (!stage) return;
         const oldScale = stage.scaleX(), ptr = stage.getPointerPosition(); 
         if (!ptr) return;
@@ -247,7 +249,7 @@ export default function PanelDesigner() {
                 X: {currentMousePos?.x ?? 0}" Y: {currentMousePos?.y ?? 0}"
             </div>
             <div className="flex-1 relative cursor-crosshair overflow-hidden" onWheel={onWheel}>
-                <Stage width={window.innerWidth} height={window.innerHeight} draggable onClick={handleStageClick} onMouseMove={handleStageMouseMove}>
+                <Stage ref={stageRef} width={window.innerWidth} height={window.innerHeight} draggable onClick={handleStageClick} onMouseMove={handleStageMouseMove}>
                     <Layer>
                         <Group x={100} y={100}>
                             <Line points={[0, 0, canvasSize * scale, 0]} stroke="#ddd" strokeWidth={1} />
