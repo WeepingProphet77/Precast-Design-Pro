@@ -182,9 +182,12 @@ export default function PanelDesigner() {
   };
 
   const onWheel = (e: any) => {
-        e.evt.preventDefault(); const stage = e.target.getStage(), oldScale = stage.scaleX(), ptr = stage.getPointerPosition(); if (!ptr) return;
+        if (e.evt) e.evt.preventDefault();
+        const stage = e.target.getStage(), oldScale = stage.scaleX(), ptr = stage.getPointerPosition(); 
+        if (!ptr) return;
         const pt = { x: (ptr.x - stage.x()) / oldScale, y: (ptr.y - stage.y()) / oldScale };
-        const newScale = e.evt.deltaY < 0 ? oldScale * 1.1 : oldScale / 1.1;
+        const delta = e.evt ? e.evt.deltaY : 0;
+        const newScale = delta < 0 ? oldScale * 1.1 : oldScale / 1.1;
         stage.scale({ x: newScale, y: newScale });
         stage.position({ x: ptr.x - pt.x * newScale, y: ptr.y - pt.y * newScale });
         stage.batchDraw();
