@@ -36,14 +36,21 @@ Preferred communication style: Simple, everyday language.
 - Database schema in `shared/schema.ts` uses Drizzle ORM with Zod integration for validation
 - Calculations (LRFD load combinations) performed client-side in `client/src/lib/calculations.ts`
 
-### CAD Features
-- **Blank Canvas**: Starts with empty workspace for custom panel designs
-- **Line Drawing Tool**: Continuous polyline creation with endpoint snapping
-- **Angle Snapping**: Hold Shift to snap lines to 45-degree increments
-- **Endpoint Snapping**: Automatically snaps to existing endpoints when drawing
-- **Move/Copy Tools**: Translate and duplicate sketch objects
-- **Coordinate System**: CAD-standard origin at bottom-left, Y-axis pointing up
-- **Command Line**: AutoCAD-style command interface at bottom of canvas
+### Panel Geometry Input
+- **DXF File Import**: Import .DXF files to define panel geometry (supports LWPOLYLINE, POLYLINE, LINE, ARC, CIRCLE, POINT, INSERT entities)
+- **Rectangle Template**: Quick rectangular panel creation by specifying width and height
+- **Automatic Classification**: Largest closed polyline becomes perimeter; smaller enclosed polylines become openings
+- **Coordinate Normalization**: Lower-left corner of imported geometry is set to (0,0)
+- **Imported Nodes**: POINT/INSERT entities from DXF are preserved as snap points for connection placement
+- **Grid Background**: 12" grid displayed behind panel geometry
+- **Datum Marker**: X, Y, Z datum axes shown at panel origin (0,0)
+- **Filled Display**: Panel shape rendered with fill and opening cutouts using even-odd fill rule
+
+### Connection Placement
+- **Click to Place**: Click on canvas to place connections, with automatic snapping to imported geometry vertices and nodes
+- **Coordinate Entry**: Dialog to enter exact X, Y coordinates for precise connection placement
+- **Snap-to-Geometry**: Connections snap to perimeter vertices, opening corners, sketch line endpoints, and imported nodes
+- **Drag to Reposition**: Connections can be dragged to new positions on the canvas
 
 ### Key Application Pages
 1. **Project Info** (`/`) - Project metadata configuration
