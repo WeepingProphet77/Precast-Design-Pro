@@ -1,16 +1,17 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Stage, Layer, Rect, Circle, Text, Group, Line, Shape } from "react-konva";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { Stage, Layer, Rect, Circle, Text, Group, Line, Shape, RegularPolygon } from "react-konva";
 import { useProject } from "@/lib/store";
-import { Panel, ConnectionNode, Vertex, Opening } from "@/lib/types";
+import { Panel, ConnectionNode, ConnectionMarker, Vertex, Opening } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { calculateLoadCombinations } from "@/lib/calculations";
+import { calculateCentroid } from "@/lib/centroid";
 import { parseDxfFile } from "@/lib/dxfParser";
 import {
-  Plus, Trash2, ZoomIn, ZoomOut, MousePointer2, Upload, Square,
+  Plus, Trash2, ZoomIn, ZoomOut, MousePointer2, Upload, Square as SquareIcon,
   ArrowUpRight, Crosshair, RotateCcw
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -21,6 +22,8 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 
+type SelectionType = { kind: "connection"; id: string } | { kind: "centroid" } | null;
+
 export default function PanelDesigner() {
   const { project, updatePanel, addPanel, updateConnection, addConnection, deleteConnection } = useProject();
   const stageRef = useRef<any>(null);
@@ -29,7 +32,7 @@ export default function PanelDesigner() {
 
   const [activePanelId, setActivePanelId] = useState<string>(project.panels[0]?.id || "");
   const [activePanel, setActivePanel] = useState<Panel | undefined>(undefined);
-  const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
+  const [selection, setSelection] = useState<SelectionType>(null);
   const [scale, setScale] = useState(3);
   const [tool, setTool] = useState<"select" | "connection">("select");
   const [currentMousePos, setCurrentMousePos] = useState<{ x: number; y: number } | null>(null);
@@ -52,6 +55,19 @@ export default function PanelDesigner() {
     if (p) setActivePanel(p);
     else if (project.panels.length > 0) setActivePanelId(project.panels[0].id);
   }, [project.panels, activePanelId]);
+
+  const computedCentroid = useMemo(() => {
+    if (!activePanel || activePanel.perimeter.length < 3) return null;
+    return calculateCentroid(activePanel.perimeter, activePanel.openings);
+  }, [activePanel?.perimeter, activePanel?.openings]);
+
+  const centroidPos = useMemo(() => {
+    if (!activePanel) return null;
+    if (activePanel.centroidX !== undefined && activePanel.centroidY !== undefined) {
+      return { x: activePanel.centroidX, y: activePanel.centroidY };
+    }
+    return computedCentroid;
+  }, [activePanel?.centroidX, activePanel?.centroidY, computedCentroid]);
 
   const getSnapPoints = useCallback((): { x: number; y: number }[] => {
     if (!activePanel) return [];
@@ -119,6 +135,10 @@ export default function PanelDesigner() {
       }
 
       if (activePanel) {
+        const centroid = calculateCentroid(
+          result.perimeter,
+          result.openings
+        );
         updatePanel({
           ...activePanel,
           width: result.width,
@@ -127,11 +147,13 @@ export default function PanelDesigner() {
           openings: result.openings,
           sketchLines: result.sketchLines.map(l => ({ id: crypto.randomUUID(), ...l })),
           importedNodes: result.nodes,
+          centroidX: centroid.x,
+          centroidY: centroid.y,
         });
-        toast({ title: "DXF Imported", description: `Panel geometry updated: ${result.perimeter.length} vertices, ${result.openings.length} openings, ${result.nodes.length} snap points.` });
+        toast({ title: "DXF Imported", description: `Imported panel ${result.width.toFixed(1)}" × ${result.height.toFixed(1)}" with ${result.openings.length} opening(s).` });
       }
-    } catch (err) {
-      toast({ title: "Import Error", description: "Failed to parse DXF file. Please check the file format.", variant: "destructive" });
+    } catch (err: any) {
+      toast({ title: "Import Error", description: err.message || "Failed to parse DXF file.", variant: "destructive" });
     }
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
@@ -153,6 +175,8 @@ export default function PanelDesigner() {
       openings: [],
       sketchLines: [],
       importedNodes: [],
+      centroidX: w / 2,
+      centroidY: h / 2,
     });
     setRectDialogOpen(false);
     toast({ title: "Rectangle Template", description: `Panel set to ${w}" × ${h}" rectangle.` });
@@ -165,12 +189,13 @@ export default function PanelDesigner() {
       id,
       label: `C-${activePanel.connections.length + 1}`,
       type: "A",
+      marker: "diamond",
       x: coordX,
       y: coordY,
       forces: { D: { x: 0, y: 0, z: 0 }, L: { x: 0, y: 0, z: 0 }, W: { x: 0, y: 0, z: 0 }, E: { x: 0, y: 0, z: 0 } },
     };
     addConnection(activePanel.id, conn);
-    setSelectedConnectionId(id);
+    setSelection({ kind: "connection", id });
     setCoordDialogOpen(false);
     toast({ title: "Connection Added", description: `Connection ${conn.label} placed at (${coordX}, ${coordY}).` });
   };
@@ -208,7 +233,7 @@ export default function PanelDesigner() {
 
     if (tool === "select") {
       if (e.target === stage) {
-        setSelectedConnectionId(null);
+        setSelection(null);
       }
       return;
     }
@@ -222,29 +247,32 @@ export default function PanelDesigner() {
         id,
         label: `C-${activePanel.connections.length + 1}`,
         type: "A",
+        marker: "diamond",
         x: finalX,
         y: finalY,
         forces: { D: { x: 0, y: 0, z: 0 }, L: { x: 0, y: 0, z: 0 }, W: { x: 0, y: 0, z: 0 }, E: { x: 0, y: 0, z: 0 } },
       };
       addConnection(activePanel.id, conn);
-      setSelectedConnectionId(id);
+      setSelection({ kind: "connection", id });
       return;
     }
   };
 
   const onWheel = (e: any) => {
-    if (e.evt) e.evt.preventDefault();
-    const stage = stageRef.current;
+    e.evt.preventDefault();
+    const stage = e.target.getStage();
     if (!stage) return;
     const oldScale = stage.scaleX();
-    const ptr = stage.getPointerPosition();
-    if (!ptr) return;
-    const pt = { x: (ptr.x - stage.x()) / oldScale, y: (ptr.y - stage.y()) / oldScale };
-    const delta = e.evt ? e.evt.deltaY : 0;
-    const newScale = delta < 0 ? oldScale * 1.1 : oldScale / 1.1;
+    const pointer = stage.getPointerPosition();
+    if (!pointer) return;
+    const scaleBy = 1.1;
+    const newScale = e.evt.deltaY < 0 ? oldScale * scaleBy : oldScale / scaleBy;
     stage.scale({ x: newScale, y: newScale });
-    stage.position({ x: ptr.x - pt.x * newScale, y: ptr.y - pt.y * newScale });
-    stage.batchDraw();
+    const newPos = {
+      x: pointer.x - (pointer.x - stage.x()) * (newScale / oldScale),
+      y: pointer.y - (pointer.y - stage.y()) * (newScale / oldScale),
+    };
+    stage.position(newPos);
   };
 
   useEffect(() => {
@@ -286,10 +314,61 @@ export default function PanelDesigner() {
     }
   }
 
-  const perimeterPoints = activePanel.perimeter.flatMap(v => {
-    const s = screenFromCad(v.x, v.y);
-    return [s.x, s.y];
-  });
+  const selectedConnectionId = selection?.kind === "connection" ? selection.id : null;
+  const isCentroidSelected = selection?.kind === "centroid";
+
+  const renderConnectionMarker = (c: ConnectionNode, isSelected: boolean) => {
+    const markerType = c.marker || "diamond";
+    const fill = isSelected ? "#dc2626" : "#22c55e";
+    const stroke = isSelected ? "#991b1b" : "#15803d";
+    const size = 8;
+
+    switch (markerType) {
+      case "triangle-down":
+        return (
+          <RegularPolygon
+            sides={3}
+            radius={size}
+            fill={fill}
+            stroke={stroke}
+            strokeWidth={1}
+            rotation={180}
+          />
+        );
+      case "circle":
+        return (
+          <Circle
+            radius={size - 1}
+            fill={fill}
+            stroke={stroke}
+            strokeWidth={1}
+          />
+        );
+      case "square":
+        return (
+          <Rect
+            x={-size + 1}
+            y={-size + 1}
+            width={(size - 1) * 2}
+            height={(size - 1) * 2}
+            fill={fill}
+            stroke={stroke}
+            strokeWidth={1}
+          />
+        );
+      case "diamond":
+      default:
+        return (
+          <Rect
+            x={-6} y={-6} width={12} height={12}
+            fill={fill}
+            stroke={stroke}
+            strokeWidth={1}
+            rotation={45}
+          />
+        );
+    }
+  };
 
   return (
     <div className="flex h-full flex-col" data-testid="panel-designer">
@@ -334,7 +413,7 @@ export default function PanelDesigner() {
           <Dialog open={rectDialogOpen} onOpenChange={setRectDialogOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" size="sm" className="h-9" data-testid="button-rect-template">
-                <Square className="w-4 h-4 mr-1" /> Rectangle
+                <SquareIcon className="w-4 h-4 mr-1" /> Rectangle
               </Button>
             </DialogTrigger>
             <DialogContent className="sm:max-w-[380px]">
@@ -446,7 +525,7 @@ export default function PanelDesigner() {
                     <Upload className="w-4 h-4 mr-1" /> Import DXF
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => setRectDialogOpen(true)} data-testid="button-rect-empty">
-                    <Square className="w-4 h-4 mr-1" /> Rectangle
+                    <SquareIcon className="w-4 h-4 mr-1" /> Rectangle
                   </Button>
                 </div>
               </div>
@@ -544,7 +623,6 @@ export default function PanelDesigner() {
 
                   {hasGeometry && (
                     <Group>
-                      {/* Datum at origin (lower-left) */}
                       {(() => {
                         const origin = screenFromCad(0, 0);
                         return (
@@ -575,8 +653,40 @@ export default function PanelDesigner() {
                     );
                   })}
 
+                  {centroidPos && hasGeometry && (() => {
+                    const s = screenFromCad(centroidPos.x, centroidPos.y);
+                    return (
+                      <Group
+                        x={s.x}
+                        y={s.y}
+                        draggable
+                        onDragEnd={(e) => {
+                          const newScreenX = e.target.x();
+                          const newScreenY = e.target.y();
+                          const newCad = cadFromScreen(newScreenX, newScreenY);
+                          updatePanel({
+                            ...activePanel,
+                            centroidX: Math.round(newCad.x * 100) / 100,
+                            centroidY: Math.round(newCad.y * 100) / 100,
+                          });
+                          e.target.position({ x: newScreenX, y: newScreenY });
+                        }}
+                        onClick={(e) => {
+                          e.cancelBubble = true;
+                          setSelection({ kind: "centroid" });
+                        }}
+                      >
+                        <Circle radius={10} stroke={isCentroidSelected ? "#dc2626" : "#7c3aed"} strokeWidth={2} fill="transparent" />
+                        <Line points={[-10, 0, 10, 0]} stroke={isCentroidSelected ? "#dc2626" : "#7c3aed"} strokeWidth={1.5} />
+                        <Line points={[0, -10, 0, 10]} stroke={isCentroidSelected ? "#dc2626" : "#7c3aed"} strokeWidth={1.5} />
+                        <Text text="CG" x={12} y={-6} fontSize={10} fontStyle="bold" fill={isCentroidSelected ? "#dc2626" : "#7c3aed"} />
+                      </Group>
+                    );
+                  })()}
+
                   {activePanel.connections.map(c => {
                     const s = screenFromCad(c.x, c.y);
+                    const isSelected = selectedConnectionId === c.id;
                     return (
                       <Group
                         key={c.id}
@@ -592,18 +702,10 @@ export default function PanelDesigner() {
                         }}
                         onClick={(e) => {
                           e.cancelBubble = true;
-                          setSelectedConnectionId(c.id);
+                          setSelection({ kind: "connection", id: c.id });
                         }}
                       >
-                        <Rect
-                          x={-6} y={-6} width={12} height={12}
-                          fill={selectedConnectionId === c.id ? "#dc2626" : "#22c55e"}
-                          stroke={selectedConnectionId === c.id ? "#991b1b" : "#15803d"}
-                          strokeWidth={1}
-                          rotation={45}
-                          offsetX={0}
-                          offsetY={0}
-                        />
+                        {renderConnectionMarker(c, isSelected)}
                         <Text text={c.label} x={10} y={-14} fontSize={11} fontStyle="bold" fill="#1e293b" />
                         <Text text={`(${c.x.toFixed(1)}, ${c.y.toFixed(1)})`} x={10} y={0} fontSize={9} fill="#64748b" />
                       </Group>
@@ -633,17 +735,181 @@ export default function PanelDesigner() {
         </div>
 
         <div className="w-[340px] border-l bg-card flex flex-col shrink-0 shadow-sm z-10">
-          {selectedConnectionId ? (
-            <ConnectionProperties panelId={activePanel.id} connectionId={selectedConnectionId} onDeselect={() => setSelectedConnectionId(null)} />
+          {selection?.kind === "connection" ? (
+            <ConnectionProperties panelId={activePanel.id} connectionId={selection.id} onDeselect={() => setSelection(null)} />
+          ) : selection?.kind === "centroid" ? (
+            <CentroidProperties panel={activePanel} computedCentroid={computedCentroid} onDeselect={() => setSelection(null)} />
           ) : (
-            <div className="p-6 flex flex-col items-center justify-center text-center opacity-50 flex-1">
-              <MousePointer2 className="w-10 h-10 mb-3" />
-              <p className="text-sm text-muted-foreground">Select a connection to view properties</p>
-              <p className="text-xs text-muted-foreground mt-1">or use "Place Connection" to add one</p>
-            </div>
+            <PanelProperties panel={activePanel} />
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function PanelProperties({ panel }: { panel: Panel }) {
+  const { updatePanel } = useProject();
+
+  const updateField = (field: keyof Panel, value: number) => {
+    updatePanel({ ...panel, [field]: value });
+  };
+
+  return (
+    <ScrollArea className="flex-1">
+      <div className="p-4 space-y-4">
+        <div>
+          <h3 className="font-bold text-sm text-primary mb-3" data-testid="text-panel-props-title">Panel Properties</h3>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label className="text-[10px] uppercase">Panel Name</Label>
+              <Input
+                value={panel.name}
+                onChange={e => updatePanel({ ...panel, name: e.target.value })}
+                className="h-8 text-xs"
+                data-testid="input-panel-name"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <Label className="text-[10px] uppercase">Thickness (in)</Label>
+                <Input
+                  type="number"
+                  value={panel.thickness}
+                  onChange={e => updateField("thickness", Number(e.target.value))}
+                  className="h-8 text-xs font-mono"
+                  data-testid="input-panel-thickness"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[10px] uppercase">Dimensions</Label>
+                <div className="h-8 flex items-center text-xs font-mono text-muted-foreground">
+                  {panel.width.toFixed(1)}" × {panel.height.toFixed(1)}"
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <Separator />
+
+        <div>
+          <h4 className="font-semibold text-xs text-muted-foreground uppercase tracking-wider mb-3">Weights & Loads</h4>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label className="text-[10px] uppercase">Panel Weight (lbs)</Label>
+              <Input
+                type="number"
+                value={panel.panelWeight ?? 0}
+                onChange={e => updateField("panelWeight", Number(e.target.value))}
+                className="h-8 text-xs font-mono"
+                data-testid="input-panel-weight"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px] uppercase">Weight of Supported Elements (lbs)</Label>
+              <Input
+                type="number"
+                value={panel.supportedElementsWeight ?? 0}
+                onChange={e => updateField("supportedElementsWeight", Number(e.target.value))}
+                className="h-8 text-xs font-mono"
+                data-testid="input-supported-weight"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px] uppercase">Design (+) Wind Pressure (psf)</Label>
+              <Input
+                type="number"
+                value={panel.positiveWindPressure ?? 0}
+                onChange={e => updateField("positiveWindPressure", Number(e.target.value))}
+                className="h-8 text-xs font-mono"
+                data-testid="input-pos-wind"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px] uppercase">Design (-) Wind Pressure (psf)</Label>
+              <Input
+                type="number"
+                value={panel.negativeWindPressure ?? 0}
+                onChange={e => updateField("negativeWindPressure", Number(e.target.value))}
+                className="h-8 text-xs font-mono"
+                data-testid="input-neg-wind"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px] uppercase">Seismic Force Fp (lbs)</Label>
+              <Input
+                type="number"
+                value={panel.seismicForceFp ?? 0}
+                onChange={e => updateField("seismicForceFp", Number(e.target.value))}
+                className="h-8 text-xs font-mono"
+                data-testid="input-seismic-fp"
+              />
+            </div>
+          </div>
+        </div>
+
+        <Separator />
+
+        <div className="text-xs text-muted-foreground">
+          <p>Select a connection or centroid marker on the canvas to edit its properties.</p>
+        </div>
+      </div>
+    </ScrollArea>
+  );
+}
+
+function CentroidProperties({ panel, computedCentroid, onDeselect }: { panel: Panel; computedCentroid: { x: number; y: number } | null; onDeselect: () => void }) {
+  const { updatePanel } = useProject();
+  const cx = panel.centroidX ?? computedCentroid?.x ?? 0;
+  const cy = panel.centroidY ?? computedCentroid?.y ?? 0;
+
+  const resetToComputed = () => {
+    if (computedCentroid) {
+      updatePanel({ ...panel, centroidX: computedCentroid.x, centroidY: computedCentroid.y });
+    }
+  };
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex justify-between items-center">
+        <h3 className="font-bold text-sm text-primary" data-testid="text-centroid-title">Centroid (CG)</h3>
+        <Button variant="ghost" size="sm" onClick={onDeselect} data-testid="button-deselect-centroid">
+          <MousePointer2 className="w-4 h-4" />
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1">
+          <Label className="text-[10px] uppercase">X (in)</Label>
+          <Input
+            type="number"
+            value={cx}
+            onChange={e => updatePanel({ ...panel, centroidX: Number(e.target.value) })}
+            className="h-8 text-xs font-mono"
+            data-testid="input-centroid-x"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-[10px] uppercase">Y (in)</Label>
+          <Input
+            type="number"
+            value={cy}
+            onChange={e => updatePanel({ ...panel, centroidY: Number(e.target.value) })}
+            className="h-8 text-xs font-mono"
+            data-testid="input-centroid-y"
+          />
+        </div>
+      </div>
+
+      {computedCentroid && (
+        <div className="text-xs text-muted-foreground space-y-2">
+          <p>Computed centroid: ({computedCentroid.x.toFixed(2)}, {computedCentroid.y.toFixed(2)})</p>
+          <Button variant="outline" size="sm" onClick={resetToComputed} className="w-full" data-testid="button-reset-centroid">
+            <RotateCcw className="w-3 h-3 mr-1" /> Reset to Computed
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -653,6 +919,20 @@ function ConnectionProperties({ panelId, connectionId, onDeselect }: { panelId: 
   const panel = project.panels.find(p => p.id === panelId);
   const connection = panel?.connections.find(c => c.id === connectionId);
   if (!connection) return null;
+
+  const markerOptions: { value: ConnectionMarker; label: string }[] = [
+    { value: "diamond", label: "◆ Diamond" },
+    { value: "triangle-down", label: "▼ Triangle Down" },
+    { value: "circle", label: "● Circle" },
+    { value: "square", label: "■ Square" },
+  ];
+
+  const loadLabels: Record<string, string> = {
+    D: "Dead",
+    L: "Live",
+    W: "Wind",
+    E: "Seismic",
+  };
 
   return (
     <Tabs defaultValue="forces" className="flex-1 flex flex-col">
@@ -693,6 +973,17 @@ function ConnectionProperties({ panelId, connectionId, onDeselect }: { panelId: 
               </Select>
             </div>
           </div>
+          <div className="space-y-1">
+            <Label className="text-[10px] uppercase">Marker Icon</Label>
+            <Select value={connection.marker || "diamond"} onValueChange={(val: ConnectionMarker) => updateConnection(panelId, { ...connection, marker: val })}>
+              <SelectTrigger data-testid="select-connection-marker"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {markerOptions.map(opt => (
+                  <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
               <Label className="text-[10px] uppercase">X (in)</Label>
@@ -728,34 +1019,38 @@ function ConnectionProperties({ panelId, connectionId, onDeselect }: { panelId: 
       <ScrollArea className="flex-1">
         <TabsContent value="forces" className="p-4 m-0">
           <div className="space-y-4">
-            {Object.entries(connection.forces).map(([caseKey, forces]) => (
-              <div key={caseKey} className="space-y-2 p-3 bg-muted/20 rounded border border-border/50">
-                <div className="flex items-center gap-2 mb-1">
-                  <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-bold text-primary">{caseKey}</div>
-                  <span className="text-xs font-bold uppercase tracking-wider">{caseKey === "D" ? "Dead" : caseKey === "L" ? "Live" : caseKey === "W" ? "Wind" : "Seismic"}</span>
+            {(["D", "L", "W", "E"] as const).map(caseKey => {
+              const forces = connection.forces[caseKey];
+              if (!forces) return null;
+              return (
+                <div key={caseKey} className="space-y-2 p-3 bg-muted/20 rounded border border-border/50">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-bold text-primary">{caseKey}</div>
+                    <span className="text-xs font-bold uppercase tracking-wider">{loadLabels[caseKey]}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {["x", "y", "z"].map(axis => (
+                      <div key={axis} className="space-y-1">
+                        <Label className="text-[10px] uppercase">F{axis}</Label>
+                        <Input
+                          type="number"
+                          className="h-7 text-xs font-mono"
+                          value={forces[axis as keyof typeof forces]}
+                          onChange={e => {
+                            const val = Number(e.target.value);
+                            updateConnection(panelId, {
+                              ...connection,
+                              forces: { ...connection.forces, [caseKey]: { ...forces, [axis]: val } },
+                            });
+                          }}
+                          data-testid={`input-force-${caseKey}-${axis}`}
+                        />
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
-                  {["x", "y", "z"].map(axis => (
-                    <div key={axis} className="space-y-1">
-                      <Label className="text-[10px] uppercase">F{axis}</Label>
-                      <Input
-                        type="number"
-                        className="h-7 text-xs font-mono"
-                        value={forces[axis as keyof typeof forces]}
-                        onChange={e => {
-                          const val = Number(e.target.value);
-                          updateConnection(panelId, {
-                            ...connection,
-                            forces: { ...connection.forces, [caseKey]: { ...forces, [axis]: val } },
-                          });
-                        }}
-                        data-testid={`input-force-${caseKey}-${axis}`}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </TabsContent>
 
