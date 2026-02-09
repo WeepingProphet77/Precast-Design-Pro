@@ -2,12 +2,13 @@
 import React from "react";
 import { Link, useLocation } from "wouter";
 import { useProject } from "@/lib/store";
+import { exportProjectToPDF } from "@/lib/pdfExport";
 import { cn } from "@/lib/utils";
-import { LayoutGrid, PenTool, Database, Activity, FileSpreadsheet } from "lucide-react";
+import { LayoutGrid, PenTool, Database, Activity, FileSpreadsheet, Save, FolderOpen, FileText } from "lucide-react";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
-  const { project } = useProject();
+  const { project, saveProjectToFile, loadProjectFromFile } = useProject();
 
   const navItems = [
     { href: "/", label: "Project Info", icon: LayoutGrid },
@@ -18,7 +19,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
-      {/* Sidebar */}
       <aside className="w-64 bg-sidebar border-r border-sidebar-border flex flex-col shrink-0">
         <div className="p-6 border-b border-sidebar-border/50">
           <div className="flex items-center gap-2 mb-1">
@@ -55,14 +55,44 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </nav>
         </div>
 
-        <div className="mt-auto p-4 border-t border-sidebar-border/50">
-           <div className="text-xs text-sidebar-foreground/50 text-center">
-             LRFD ASCE 7-16 Compliant
-           </div>
+        <div className="mt-auto">
+          <div className="px-4 pb-4 space-y-1">
+            <div className="text-xs font-medium text-sidebar-foreground/40 uppercase tracking-wider mb-2 px-2">
+              File
+            </div>
+            <button
+              onClick={saveProjectToFile}
+              className="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer w-full text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              data-testid="button-save-project"
+            >
+              <Save className="w-4 h-4" />
+              Save Project
+            </button>
+            <button
+              onClick={loadProjectFromFile}
+              className="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer w-full text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              data-testid="button-load-project"
+            >
+              <FolderOpen className="w-4 h-4" />
+              Open Project
+            </button>
+            <button
+              onClick={() => exportProjectToPDF(project)}
+              className="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer w-full text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              data-testid="button-print-pdf"
+            >
+              <FileText className="w-4 h-4" />
+              Print to PDF
+            </button>
+          </div>
+          <div className="p-4 border-t border-sidebar-border/50">
+            <div className="text-xs text-sidebar-foreground/50 text-center">
+              LRFD ASCE 7-16 Compliant
+            </div>
+          </div>
         </div>
       </aside>
 
-      {/* Main Content */}
       <main className="flex-1 flex flex-col overflow-hidden">
         <header className="h-14 bg-card border-b flex items-center px-6 shrink-0 justify-between">
            <h1 className="text-sm font-semibold text-foreground/80">
