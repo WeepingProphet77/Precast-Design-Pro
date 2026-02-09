@@ -20,12 +20,16 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
   DialogHeader, DialogTitle, DialogTrigger
 } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 
 type SelectionType = { kind: "connection"; id: string } | { kind: "centroid" } | null;
 
 export default function PanelDesigner() {
-  const { project, updatePanel, addPanel, updateConnection, addConnection, deleteConnection } = useProject();
+  const { project, updatePanel, addPanel, deletePanel, updateConnection, addConnection, deleteConnection } = useProject();
   const stageRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -387,6 +391,42 @@ export default function PanelDesigner() {
           <Button variant="outline" size="sm" onClick={addPanel} className="h-9" data-testid="button-new-panel">
             <Plus className="w-4 h-4 mr-1" /> New
           </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" size="sm" className="h-9 text-destructive hover:text-destructive" data-testid="button-delete-panel">
+                <Trash2 className="w-4 h-4 mr-1" /> Delete
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete Panel "{activePanel.name}"?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will permanently remove the panel and all {activePanel.connections.length} connection(s) on it. Connection data will also be removed from the Master Spreadsheet. This cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel data-testid="button-cancel-delete-panel">Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  onClick={() => {
+                    const id = activePanel.id;
+                    const remaining = project.panels.filter(p => p.id !== id);
+                    deletePanel(id);
+                    setSelection(null);
+                    if (remaining.length > 0) {
+                      setActivePanelId(remaining[0].id);
+                    } else {
+                      setActivePanelId("");
+                    }
+                    toast({ title: "Panel Deleted", description: `Panel "${activePanel.name}" and its connections have been removed.` });
+                  }}
+                  data-testid="button-confirm-delete-panel"
+                >
+                  Delete Panel
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
 
         <Separator orientation="vertical" className="h-6" />
