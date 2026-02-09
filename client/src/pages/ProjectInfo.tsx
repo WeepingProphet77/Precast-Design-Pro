@@ -118,7 +118,7 @@ export default function ProjectInfo() {
                 <ul className="text-sm text-muted-foreground list-disc list-inside space-y-1">
                     <li>ASCE 7-16 Minimum Design Loads</li>
                     <li>ACI 318-19 Building Code Requirements for Structural Concrete</li>
-                    <li>PCI Design Handbook 8th Edition</li>
+                    <li>PCI Design Handbook 9th Edition</li>
                 </ul>
               </div>
             </form>
