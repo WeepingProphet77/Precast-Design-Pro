@@ -52,6 +52,19 @@ Preferred communication style: Simple, everyday language.
 - **Snap-to-Geometry**: Connections snap to perimeter vertices, opening corners, sketch line endpoints, and imported nodes
 - **Drag to Reposition**: Connections can be dragged to new positions on the canvas
 
+### File Save/Load System
+- **Local File Storage**: All project data saved as .ppd (PrecastPro Data) JSON files downloadable to local machine
+- **File Load**: Open .ppd or .json files to restore complete project state
+- **No Server Persistence Required**: Project data resides entirely in local files
+
+### PDF Export
+- **Professional Report**: Multi-page PDF generated via jsPDF with jspdf-autotable
+- **Project Data Sheet**: Cover page with project info, panel index, and ASCE 7-16 design basis
+- **Panel Pages**: One page per panel with properties, geometry drawing (perimeter, openings, connections, centroid), connection forces table, and LRFD load combination results with utilization coloring
+- **Master Spreadsheet**: Aggregated governing load cases for all connections across all panels
+- **Capacity Table**: Connection capacity definitions and usage summary
+- **Utilization Coloring**: Green (<90%), amber (90-100%), red (>100%) for utilization ratios
+
 ### Key Application Pages
 1. **Project Info** (`/`) - Project metadata configuration
 2. **Panel Designer** (`/design`) - Interactive canvas for panel geometry and connection placement
