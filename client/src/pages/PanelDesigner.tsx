@@ -921,10 +921,10 @@ function ConnectionProperties({ panelId, connectionId, onDeselect }: { panelId: 
   if (!connection) return null;
 
   const markerOptions: { value: ConnectionMarker; label: string }[] = [
-    { value: "diamond", label: "◆ Diamond" },
-    { value: "triangle-down", label: "▼ Triangle Down" },
-    { value: "circle", label: "● Circle" },
-    { value: "square", label: "■ Square" },
+    { value: "triangle-down", label: "▼ Bearing" },
+    { value: "circle", label: "● Tieback" },
+    { value: "square", label: "■ Lateral" },
+    { value: "diamond", label: "◆ Panel-to-Panel" },
   ];
 
   const loadLabels: Record<string, string> = {
@@ -1020,8 +1020,7 @@ function ConnectionProperties({ panelId, connectionId, onDeselect }: { panelId: 
         <TabsContent value="forces" className="p-4 m-0">
           <div className="space-y-4">
             {(["D", "L", "W", "E"] as const).map(caseKey => {
-              const forces = connection.forces[caseKey];
-              if (!forces) return null;
+              const forces = connection.forces[caseKey] || { x: 0, y: 0, z: 0 };
               return (
                 <div key={caseKey} className="space-y-2 p-3 bg-muted/20 rounded border border-border/50">
                   <div className="flex items-center gap-2 mb-1">
