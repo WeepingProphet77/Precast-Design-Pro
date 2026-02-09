@@ -321,7 +321,7 @@ export default function PanelDesigner() {
     const markerType = c.marker || "diamond";
     const fill = isSelected ? "#dc2626" : "#22c55e";
     const stroke = isSelected ? "#991b1b" : "#15803d";
-    const size = 8;
+    const size = 16;
 
     switch (markerType) {
       case "triangle-down":
@@ -360,7 +360,7 @@ export default function PanelDesigner() {
       default:
         return (
           <Rect
-            x={-6} y={-6} width={12} height={12}
+            x={-12} y={-12} width={24} height={24}
             fill={fill}
             stroke={stroke}
             strokeWidth={1}
