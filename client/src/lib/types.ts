@@ -33,9 +33,9 @@ export interface FactoredLoad {
 export interface ConnectionNode {
   id: string;
   label: string;
-  type: string; // e.g., "A", "B", "C"
-  x: number; // inches
-  y: number; // inches
+  type: string;
+  x: number;
+  y: number;
   forces: ConnectionForces;
 }
 
@@ -43,7 +43,7 @@ export interface Vertex {
   id: string;
   x: number;
   y: number;
-  radius?: number; // Fillet radius in inches
+  radius?: number;
 }
 
 export interface Opening {
@@ -52,21 +52,23 @@ export interface Opening {
   y: number;
   width: number;
   height: number;
-  type: "rect" | "circle";
+  type: "rect" | "circle" | "polygon";
+  vertices?: { x: number; y: number }[];
 }
 
 export interface Panel {
   id: string;
-  name: string; // e.g., "P-1"
+  name: string;
   description?: string;
-  width: number; // inches (Bounding box or initial)
-  height: number; // inches
-  thickness: number; // inches
-  weight?: number; // lbs
+  width: number;
+  height: number;
+  thickness: number;
+  weight?: number;
   perimeter: Vertex[];
   openings: Opening[];
   sketchLines: SketchLine[];
   connections: ConnectionNode[];
+  importedNodes?: { x: number; y: number }[];
 }
 
 export interface SketchLine {
@@ -98,7 +100,6 @@ export interface ProjectData {
   capacities: ConnectionCapacity[];
 }
 
-// Initial Data Factory
 export const createDefaultProject = (): ProjectData => ({
   info: {
     jobName: "New Project",
