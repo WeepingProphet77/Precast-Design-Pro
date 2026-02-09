@@ -1,10 +1,11 @@
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { ProjectData, createDefaultProject, Panel, ConnectionNode, ProjectInfo, ConnectionCapacity } from "./types";
 
 interface ProjectContextType {
   project: ProjectData;
   updateProjectInfo: (info: ProjectInfo) => void;
+  setProjectData: (data: ProjectData) => void;
   updatePanel: (panel: Panel) => void;
   addPanel: () => void;
   deletePanel: (id: string) => void;
@@ -13,6 +14,8 @@ interface ProjectContextType {
   deleteConnection: (panelId: string, connectionId: string) => void;
   updateCapacity: (capacity: ConnectionCapacity) => void;
   addCapacity: (capacity: ConnectionCapacity) => void;
+  saveProjectToFile: () => void;
+  loadProjectFromFile: () => void;
 }
 
 const ProjectContext = createContext<ProjectContextType | undefined>(undefined);
@@ -22,6 +25,10 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const updateProjectInfo = (info: ProjectInfo) => {
     setProject((prev) => ({ ...prev, info }));
+  };
+
+  const setProjectData = (data: ProjectData) => {
+    setProject(data);
   };
 
   const updatePanel = (updatedPanel: Panel) => {
@@ -105,17 +112,53 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const addCapacity = (capacity: ConnectionCapacity) => {
-      setProject((prev) => ({
-          ...prev,
-          capacities: [...prev.capacities, capacity]
-      }))
-  }
+    setProject((prev) => ({
+      ...prev,
+      capacities: [...prev.capacities, capacity]
+    }));
+  };
+
+  const saveProjectToFile = useCallback(() => {
+    const json = JSON.stringify(project, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const filename = `${project.info.jobNumber || "project"}_${project.info.jobName || "untitled"}.ppd`.replace(/\s+/g, "_");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [project]);
+
+  const loadProjectFromFile = useCallback(() => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".ppd,.json";
+    input.onchange = async (e: any) => {
+      const file = e.target?.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text) as ProjectData;
+        if (!data.info || !data.panels || !data.capacities) {
+          throw new Error("Invalid project file format");
+        }
+        setProject(data);
+      } catch (err: any) {
+        alert("Failed to load project file: " + (err.message || "Unknown error"));
+      }
+    };
+    input.click();
+  }, []);
 
   return (
     <ProjectContext.Provider
       value={{
         project,
         updateProjectInfo,
+        setProjectData,
         updatePanel,
         addPanel,
         deletePanel,
@@ -123,7 +166,9 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
         addConnection,
         deleteConnection,
         updateCapacity,
-        addCapacity
+        addCapacity,
+        saveProjectToFile,
+        loadProjectFromFile,
       }}
     >
       {children}
