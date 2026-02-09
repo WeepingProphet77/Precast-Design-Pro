@@ -9,6 +9,8 @@ export type Vector3 = {
 
 export type LoadType = "D" | "L" | "Lr" | "S" | "R" | "W" | "E";
 
+export type ConnectionMarker = "diamond" | "triangle-down" | "circle" | "square";
+
 export interface ConnectionForces {
   D: Vector3;
   L: Vector3;
@@ -36,6 +38,7 @@ export interface ConnectionNode {
   type: string;
   x: number;
   y: number;
+  marker: ConnectionMarker;
   forces: ConnectionForces;
 }
 
@@ -64,6 +67,13 @@ export interface Panel {
   height: number;
   thickness: number;
   weight?: number;
+  panelWeight?: number;
+  supportedElementsWeight?: number;
+  positiveWindPressure?: number;
+  negativeWindPressure?: number;
+  seismicForceFp?: number;
+  centroidX?: number;
+  centroidY?: number;
   perimeter: Vertex[];
   openings: Opening[];
   sketchLines: SketchLine[];
