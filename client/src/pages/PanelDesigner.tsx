@@ -935,7 +935,7 @@ function ConnectionProperties({ panelId, connectionId, onDeselect }: { panelId: 
   };
 
   return (
-    <Tabs defaultValue="forces" className="flex-1 flex flex-col">
+    <Tabs defaultValue="forces" className="flex-1 flex flex-col overflow-hidden">
       <div className="p-4 border-b bg-muted/20">
         <div className="flex justify-between items-center mb-3">
           <h3 className="font-bold text-base text-primary" data-testid="text-connection-title">Connection: {connection.label}</h3>
@@ -1019,7 +1019,7 @@ function ConnectionProperties({ panelId, connectionId, onDeselect }: { panelId: 
       <ScrollArea className="flex-1">
         <TabsContent value="forces" className="p-4 m-0">
           <div className="space-y-4">
-            {(["D", "L", "W", "E"] as const).map(caseKey => {
+            {(["D", "W", "E", "L"] as const).map(caseKey => {
               const forces = connection.forces[caseKey] || { x: 0, y: 0, z: 0 };
               return (
                 <div key={caseKey} className="space-y-2 p-3 bg-muted/20 rounded border border-border/50">
