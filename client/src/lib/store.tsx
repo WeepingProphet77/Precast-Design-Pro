@@ -14,6 +14,7 @@ interface ProjectContextType {
   deleteConnection: (panelId: string, connectionId: string) => void;
   updateCapacity: (capacity: ConnectionCapacity) => void;
   addCapacity: (capacity: ConnectionCapacity) => void;
+  deleteCapacity: (type: string) => void;
   saveProjectToFile: () => void;
   loadProjectFromFile: () => void;
 }
@@ -118,6 +119,13 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }));
   };
 
+  const deleteCapacity = (type: string) => {
+    setProject((prev) => ({
+      ...prev,
+      capacities: prev.capacities.filter((c) => c.type !== type),
+    }));
+  };
+
   const saveProjectToFile = useCallback(() => {
     const json = JSON.stringify(project, null, 2);
     const blob = new Blob([json], { type: "application/json" });
@@ -167,6 +175,7 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
         deleteConnection,
         updateCapacity,
         addCapacity,
+        deleteCapacity,
         saveProjectToFile,
         loadProjectFromFile,
       }}
