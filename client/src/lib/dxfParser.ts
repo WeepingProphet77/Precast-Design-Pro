@@ -162,6 +162,195 @@ function deCasteljau(points: Point2D[], t: number): Point2D {
   return deCasteljau(next, t);
 }
 
+function parseAcisSat(satText: string): Parsed3DFace[] {
+  const faces: Parsed3DFace[] = [];
+
+  const records: string[] = [];
+  let current = "";
+  for (const ch of satText) {
+    if (ch === "#") {
+      records.push(current.trim());
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim()) records.push(current.trim());
+
+  const pointCoords: Map<number, Point3D> = new Map();
+
+  const findEntityType = (tokens: string[]): { type: string; idx: number } => {
+    for (let ti = 0; ti < tokens.length; ti++) {
+      const t = tokens[ti];
+      if (!t.startsWith("$") && !t.startsWith("-") && !/^\d+$/.test(t) && t !== "forward" && t !== "reversed" && t !== "single" && t !== "double") {
+        return { type: t.toLowerCase(), idx: ti };
+      }
+    }
+    return { type: "", idx: 0 };
+  };
+
+  for (let ri = 0; ri < records.length; ri++) {
+    const rec = records[ri];
+    if (!rec) continue;
+
+    const tokens = rec.split(/\s+/).filter(t => t.length > 0);
+    if (tokens.length < 2) continue;
+
+    const { type: entityType, idx: typeIdx } = findEntityType(tokens);
+
+    if (entityType === "point") {
+      const nums: number[] = [];
+      for (let ti = typeIdx + 1; ti < tokens.length; ti++) {
+        const n = parseFloat(tokens[ti]);
+        if (!isNaN(n)) nums.push(n);
+      }
+      if (nums.length >= 3) {
+        pointCoords.set(ri, { x: nums[nums.length - 3], y: nums[nums.length - 2], z: nums[nums.length - 1] });
+      }
+    }
+
+    if (entityType === "straight-curve" || entityType === "straight") {
+      const nums: number[] = [];
+      for (let ti = typeIdx + 1; ti < tokens.length; ti++) {
+        const n = parseFloat(tokens[ti]);
+        if (!isNaN(n)) nums.push(n);
+      }
+      if (nums.length >= 6) {
+        pointCoords.set(ri * 10000, { x: nums[0], y: nums[1], z: nums[2] });
+      }
+    }
+  }
+
+  if (pointCoords.size >= 3) {
+    const allPoints = Array.from(pointCoords.values());
+
+    const vertexBuckets = new Map<string, Point3D>();
+    for (const p of allPoints) {
+      const key = `${p.x.toFixed(6)},${p.y.toFixed(6)},${p.z.toFixed(6)}`;
+      vertexBuckets.set(key, p);
+    }
+    const uniquePoints = Array.from(vertexBuckets.values());
+
+    if (uniquePoints.length >= 4) {
+      const convexFaces = convexHull3D(uniquePoints);
+      for (const f of convexFaces) {
+        faces.push(f);
+      }
+    } else if (uniquePoints.length === 3) {
+      faces.push({ vertices: [uniquePoints[0], uniquePoints[1], uniquePoints[2]] });
+    }
+  }
+
+  return faces;
+}
+
+function convexHull3D(points: Point3D[]): Parsed3DFace[] {
+  const faces: Parsed3DFace[] = [];
+  if (points.length < 4) {
+    if (points.length === 3) {
+      faces.push({ vertices: [points[0], points[1], points[2]] });
+    }
+    return faces;
+  }
+
+  const sub = (a: Point3D, b: Point3D): Point3D => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
+  const cross = (a: Point3D, b: Point3D): Point3D => ({
+    x: a.y * b.z - a.z * b.y,
+    y: a.z * b.x - a.x * b.z,
+    z: a.x * b.y - a.y * b.x,
+  });
+  const dot = (a: Point3D, b: Point3D) => a.x * b.x + a.y * b.y + a.z * b.z;
+  const len = (a: Point3D) => Math.sqrt(dot(a, a));
+
+  let p0 = 0, p1 = 1, p2 = -1, p3 = -1;
+
+  let maxDist = 0;
+  for (let j = 1; j < points.length; j++) {
+    const d = len(sub(points[j], points[0]));
+    if (d > maxDist) { maxDist = d; p1 = j; }
+  }
+
+  maxDist = 0;
+  const edge01 = sub(points[p1], points[p0]);
+  for (let j = 0; j < points.length; j++) {
+    if (j === p0 || j === p1) continue;
+    const v = sub(points[j], points[p0]);
+    const c = cross(edge01, v);
+    const d = len(c);
+    if (d > maxDist) { maxDist = d; p2 = j; }
+  }
+  if (p2 === -1) return faces;
+
+  const normal = cross(sub(points[p1], points[p0]), sub(points[p2], points[p0]));
+  maxDist = 0;
+  for (let j = 0; j < points.length; j++) {
+    if (j === p0 || j === p1 || j === p2) continue;
+    const d = Math.abs(dot(normal, sub(points[j], points[p0])));
+    if (d > maxDist) { maxDist = d; p3 = j; }
+  }
+  if (p3 === -1) {
+    faces.push({ vertices: [points[p0], points[p1], points[p2]] });
+    return faces;
+  }
+
+  type HullFace = [number, number, number];
+  let hull: HullFace[] = [];
+
+  const orient = dot(normal, sub(points[p3], points[p0]));
+  if (orient > 0) {
+    hull = [[p0, p2, p1], [p0, p1, p3], [p1, p2, p3], [p0, p3, p2]];
+  } else {
+    hull = [[p0, p1, p2], [p0, p3, p1], [p1, p3, p2], [p0, p2, p3]];
+  }
+
+  const assigned = new Set([p0, p1, p2, p3]);
+
+  for (let j = 0; j < points.length; j++) {
+    if (assigned.has(j)) continue;
+    let visible: number[] = [];
+    for (let fi = 0; fi < hull.length; fi++) {
+      const [a, b, c] = hull[fi];
+      const fn = cross(sub(points[b], points[a]), sub(points[c], points[a]));
+      if (dot(fn, sub(points[j], points[a])) > 1e-10) {
+        visible.push(fi);
+      }
+    }
+    if (visible.length === 0) continue;
+
+    const horizon: [number, number][] = [];
+    const visSet = new Set(visible);
+    for (const fi of visible) {
+      const [a, b, c] = hull[fi];
+      const edges: [number, number][] = [[a, b], [b, c], [c, a]];
+      for (const [ea, eb] of edges) {
+        let shared = false;
+        for (const fj of visible) {
+          if (fj === fi) continue;
+          const fVerts = hull[fj];
+          if (fVerts.includes(ea) && fVerts.includes(eb)) { shared = true; break; }
+        }
+        if (!shared) horizon.push([ea, eb]);
+      }
+    }
+
+    const newHull: HullFace[] = [];
+    for (let fi = 0; fi < hull.length; fi++) {
+      if (!visSet.has(fi)) newHull.push(hull[fi]);
+    }
+    for (const [ea, eb] of horizon) {
+      newHull.push([ea, eb, j]);
+    }
+    hull = newHull;
+    assigned.add(j);
+  }
+
+  for (const [a, b, c] of hull) {
+    faces.push({ vertices: [points[a], points[b], points[c]] });
+  }
+
+  return faces;
+}
+
 function parseDxfEntities(content: string) {
   const lines = content.split(/\r?\n/).map(l => l.trim());
   const polylines: ParsedPolyline[] = [];
@@ -224,49 +413,111 @@ function parseDxfEntities(content: string) {
 
     if (code === "0" && value === "POLYLINE") {
       let closed = false;
+      let polyFlags = 0;
       while (i < lines.length) {
         if (peek() === "0") break;
         const gc = next();
         const gv = next();
         if (gc === "70") {
-          const flags = parseInt(gv);
-          closed = (flags & 1) !== 0;
+          polyFlags = parseInt(gv);
+          closed = (polyFlags & 1) !== 0;
         }
       }
 
-      const pts: Point2D[] = [];
-      while (i < lines.length) {
-        const entityCode = peek();
-        if (entityCode !== "0") { next(); next(); continue; }
+      const isPolyfaceMesh = (polyFlags & 64) !== 0;
 
-        const savedI = i;
-        next();
-        const entityType = next();
-
-        if (entityType === "VERTEX") {
-          let vx = 0, vy = 0;
-          while (i < lines.length) {
-            if (peek() === "0") break;
-            const gc = next();
-            const gv = next();
-            if (gc === "10") vx = parseFloat(gv);
-            if (gc === "20") vy = parseFloat(gv);
+      if (isPolyfaceMesh) {
+        const meshVertices: Point3D[] = [];
+        const meshFaceRefs: number[][] = [];
+        while (i < lines.length) {
+          const entityCode = peek();
+          if (entityCode !== "0") { next(); next(); continue; }
+          const savedI = i;
+          next();
+          const entityType = next();
+          if (entityType === "VERTEX") {
+            let vx = 0, vy = 0, vz = 0;
+            let vFlags = 0;
+            let f1 = 0, f2 = 0, f3 = 0, f4 = 0;
+            while (i < lines.length) {
+              if (peek() === "0") break;
+              const gc = next();
+              const gv = next();
+              if (gc === "10") vx = parseFloat(gv);
+              if (gc === "20") vy = parseFloat(gv);
+              if (gc === "30") vz = parseFloat(gv);
+              if (gc === "70") vFlags = parseInt(gv);
+              if (gc === "71") f1 = parseInt(gv);
+              if (gc === "72") f2 = parseInt(gv);
+              if (gc === "73") f3 = parseInt(gv);
+              if (gc === "74") f4 = parseInt(gv);
+            }
+            const isFaceRecord = (vFlags & 128) !== 0 && (vFlags & 64) === 0;
+            const isVertexRecord = (vFlags & 64) !== 0 && (vFlags & 128) === 0;
+            const isBothFlags = (vFlags & 192) === 192;
+            if (isFaceRecord) {
+              const indices: number[] = [];
+              if (f1 !== 0) indices.push(Math.abs(f1));
+              if (f2 !== 0) indices.push(Math.abs(f2));
+              if (f3 !== 0) indices.push(Math.abs(f3));
+              if (f4 !== 0) indices.push(Math.abs(f4));
+              if (indices.length >= 3) meshFaceRefs.push(indices);
+            } else if (isVertexRecord || isBothFlags) {
+              meshVertices.push({ x: vx, y: vy, z: vz });
+            }
+          } else if (entityType === "SEQEND") {
+            while (i < lines.length) {
+              if (peek() === "0") break;
+              next(); next();
+            }
+            break;
+          } else {
+            i = savedI;
+            break;
           }
-          pts.push({ x: vx, y: vy });
-        } else if (entityType === "SEQEND") {
-          while (i < lines.length) {
-            if (peek() === "0") break;
-            next(); next();
-          }
-          break;
-        } else {
-          i = savedI;
-          break;
         }
-      }
-
-      if (pts.length >= 2) {
-        polylines.push({ points: pts, closed });
+        if (meshVertices.length >= 3 && meshFaceRefs.length > 0) {
+          for (const faceIdx of meshFaceRefs) {
+            const fv = faceIdx.map(idx => meshVertices[idx - 1]).filter(v => v !== undefined);
+            if (fv.length >= 3) {
+              for (let ti = 1; ti < fv.length - 1; ti++) {
+                faces3d.push({ vertices: [fv[0], fv[ti], fv[ti + 1]] });
+              }
+            }
+          }
+        }
+      } else {
+        const pts: Point2D[] = [];
+        while (i < lines.length) {
+          const entityCode = peek();
+          if (entityCode !== "0") { next(); next(); continue; }
+          const savedI = i;
+          next();
+          const entityType = next();
+          if (entityType === "VERTEX") {
+            let vx = 0, vy = 0;
+            while (i < lines.length) {
+              if (peek() === "0") break;
+              const gc = next();
+              const gv = next();
+              if (gc === "10") vx = parseFloat(gv);
+              if (gc === "20") vy = parseFloat(gv);
+            }
+            pts.push({ x: vx, y: vy });
+          } else if (entityType === "SEQEND") {
+            while (i < lines.length) {
+              if (peek() === "0") break;
+              next(); next();
+            }
+            break;
+          } else {
+            i = savedI;
+            break;
+          }
+        }
+        if (pts.length >= 2) {
+          polylines.push({ points: pts, closed });
+        }
       }
     }
 
@@ -469,6 +720,25 @@ function parseDxfEntities(content: string) {
               }
             }
           }
+        }
+      }
+    }
+
+    if (code === "0" && (value === "3DSOLID" || value === "BODY" || value === "REGION")) {
+      const satLines: string[] = [];
+      while (i < lines.length) {
+        if (peek() === "0") break;
+        const gc = next();
+        const gv = next();
+        if (gc === "1" || gc === "3") {
+          satLines.push(gv);
+        }
+      }
+      if (satLines.length > 0) {
+        const satText = satLines.join("\n");
+        const satFaces = parseAcisSat(satText);
+        for (const f of satFaces) {
+          faces3d.push(f);
         }
       }
     }

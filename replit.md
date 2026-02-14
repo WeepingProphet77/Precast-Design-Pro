@@ -37,8 +37,10 @@ Preferred communication style: Simple, everyday language.
 - Calculations (LRFD load combinations) performed client-side in `client/src/lib/calculations.ts`
 
 ### Panel Geometry Input
-- **DXF File Import**: Import .DXF files to define panel geometry (supports LWPOLYLINE, POLYLINE, LINE, ARC, CIRCLE, SPLINE, ELLIPSE, POINT, INSERT, 3DFACE, MESH entities)
-- **3D Solid Support**: 3DFACE and MESH entities parsed into triangulated face data with edge extraction
+- **DXF File Import**: Import .DXF files to define panel geometry (supports LWPOLYLINE, POLYLINE, LINE, ARC, CIRCLE, SPLINE, ELLIPSE, POINT, INSERT, 3DFACE, MESH, 3DSOLID, BODY, REGION entities)
+- **3D Solid Support**: 3DFACE, MESH, 3DSOLID, BODY, and POLYFACE MESH entities parsed into triangulated face data with edge extraction
+- **ACIS SAT Parsing**: 3DSOLID/BODY entities contain embedded ACIS SAT geometry data; parser extracts point coordinates and reconstructs faces via convex hull triangulation
+- **POLYFACE Mesh**: POLYLINE entities with flag 64 are parsed as polyface meshes with vertex/face index definitions
 - **Rectangle Template**: Quick rectangular panel creation by specifying width and height
 - **Automatic Classification**: Largest closed polyline becomes perimeter; smaller enclosed polylines become openings
 - **Coordinate Normalization**: Lower-left corner of imported geometry is set to (0,0)
