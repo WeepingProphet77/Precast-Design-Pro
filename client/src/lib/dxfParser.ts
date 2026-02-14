@@ -414,6 +414,103 @@ function convexHull3D(points: Point3D[]): Parsed3DFace[] {
   return faces;
 }
 
+function parseSabBinary(hexChunks: string[]): Parsed3DFace[] {
+  const faces: Parsed3DFace[] = [];
+  const hexStr = hexChunks.join("");
+
+  const bytes = new Uint8Array(hexStr.length / 2);
+  for (let bi = 0; bi < hexStr.length; bi += 2) {
+    bytes[bi / 2] = parseInt(hexStr.substring(bi, bi + 2), 16);
+  }
+
+  console.log(`[DXF] SAB binary: ${bytes.length} bytes`);
+
+  const view = new DataView(bytes.buffer);
+
+  const coordTriplets: Point3D[] = [];
+  const seen = new Set<string>();
+
+  for (let di = 0; di + 7 < bytes.length - 16; di += 1) {
+    try {
+      const x = view.getFloat64(di, true);
+      const y = view.getFloat64(di + 8, true);
+      const z = view.getFloat64(di + 16, true);
+
+      if (isFinite(x) && isFinite(y) && isFinite(z) &&
+          Math.abs(x) < 1e6 && Math.abs(y) < 1e6 && Math.abs(z) < 1e6 &&
+          (Math.abs(x) > 1e-10 || Math.abs(y) > 1e-10 || Math.abs(z) > 1e-10)) {
+
+        const xr = Math.round(x * 10000) / 10000;
+        const yr = Math.round(y * 10000) / 10000;
+        const zr = Math.round(z * 10000) / 10000;
+
+        const key = `${xr},${yr},${zr}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          coordTriplets.push({ x: xr, y: yr, z: zr });
+        }
+      }
+    } catch {}
+  }
+
+  console.log(`[DXF] SAB: found ${coordTriplets.length} candidate coordinate triplets`);
+
+  if (coordTriplets.length > 200) {
+    console.log("[DXF] SAB: too many candidates, filtering by clustering");
+    const filtered = filterClusteredPoints(coordTriplets);
+    coordTriplets.length = 0;
+    coordTriplets.push(...filtered);
+    console.log(`[DXF] SAB: filtered to ${coordTriplets.length} points`);
+  }
+
+  if (coordTriplets.length >= 4) {
+    const hullFaces = convexHull3D(coordTriplets);
+    for (const f of hullFaces) {
+      faces.push(f);
+    }
+  } else if (coordTriplets.length === 3) {
+    faces.push({ vertices: [coordTriplets[0], coordTriplets[1], coordTriplets[2]] });
+  }
+
+  return faces;
+}
+
+function filterClusteredPoints(points: Point3D[]): Point3D[] {
+  if (points.length <= 20) return points;
+
+  let minX = Infinity, maxX = -Infinity;
+  let minY = Infinity, maxY = -Infinity;
+  let minZ = Infinity, maxZ = -Infinity;
+  for (const p of points) {
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+    minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
+  }
+
+  const rangeX = maxX - minX;
+  const rangeY = maxY - minY;
+  const rangeZ = maxZ - minZ;
+  const maxRange = Math.max(rangeX, rangeY, rangeZ);
+  if (maxRange < 1e-6) return points.slice(0, 4);
+
+  const result: Point3D[] = [];
+  const bucketSize = maxRange / 50;
+  const buckets = new Set<string>();
+
+  for (const p of points) {
+    const bx = Math.floor((p.x - minX) / bucketSize);
+    const by = Math.floor((p.y - minY) / bucketSize);
+    const bz = Math.floor((p.z - minZ) / bucketSize);
+    const key = `${bx},${by},${bz}`;
+    if (!buckets.has(key)) {
+      buckets.add(key);
+      result.push(p);
+    }
+  }
+
+  return result;
+}
+
 function parseDxfEntities(content: string) {
   const lines = content.split(/\r?\n/).map(l => l.trim());
   const polylines: ParsedPolyline[] = [];
@@ -798,25 +895,39 @@ function parseDxfEntities(content: string) {
     if (code === "0" && (value === "3DSOLID" || value === "BODY" || value === "REGION")) {
       console.log(`[DXF] Found ${value} entity`);
       const satLines: string[] = [];
+      const binaryChunks: string[] = [];
+      const allGroupCodes: string[] = [];
       while (i < lines.length) {
         if (peek() === "0") break;
         const gc = next();
         const gv = next();
+        allGroupCodes.push(gc);
         if (gc === "1" || gc === "3") {
           satLines.push(gv);
         }
+        if (gc === "310") {
+          binaryChunks.push(gv);
+        }
       }
-      console.log(`[DXF] ${value}: collected ${satLines.length} SAT data lines`);
+      const uniqueCodes = Array.from(new Set(allGroupCodes));
+      console.log(`[DXF] ${value}: SAT lines=${satLines.length}, binary chunks=${binaryChunks.length}, group codes seen: [${uniqueCodes.join(",")}]`);
+
       if (satLines.length > 0) {
-        console.log("[DXF] First SAT line:", satLines[0].substring(0, 120));
         const satText = satLines.join("");
         const satFaces = parseAcisSat(satText);
-        console.log(`[DXF] ${value}: parsed ${satFaces.length} faces from ACIS data`);
+        console.log(`[DXF] ${value}: parsed ${satFaces.length} faces from SAT text`);
         for (const f of satFaces) {
           faces3d.push(f);
         }
+      } else if (binaryChunks.length > 0) {
+        console.log(`[DXF] ${value}: has binary SAB data (${binaryChunks.length} chunks)`);
+        const sabFaces = parseSabBinary(binaryChunks);
+        console.log(`[DXF] ${value}: parsed ${sabFaces.length} faces from SAB binary`);
+        for (const f of sabFaces) {
+          faces3d.push(f);
+        }
       } else {
-        console.log(`[DXF] ${value}: No SAT data found (group codes 1/3 missing)`);
+        console.log(`[DXF] ${value}: No geometry data found`);
       }
     }
 
