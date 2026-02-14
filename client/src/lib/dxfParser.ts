@@ -55,6 +55,108 @@ function arcToPoints(cx: number, cy: number, r: number, startAngleDeg: number, e
   return pts;
 }
 
+function ellipseToPoints(
+  cx: number, cy: number,
+  majorX: number, majorY: number,
+  ratio: number,
+  startParam: number, endParam: number,
+  segments: number = 36
+): Point2D[] {
+  const pts: Point2D[] = [];
+  const a = Math.sqrt(majorX * majorX + majorY * majorY);
+  const b = a * ratio;
+  const rotation = Math.atan2(majorY, majorX);
+  let end = endParam;
+  if (end <= startParam) end += 2 * Math.PI;
+  const step = (end - startParam) / segments;
+  for (let i = 0; i <= segments; i++) {
+    const t = startParam + step * i;
+    const lx = a * Math.cos(t);
+    const ly = b * Math.sin(t);
+    pts.push({
+      x: cx + lx * Math.cos(rotation) - ly * Math.sin(rotation),
+      y: cy + lx * Math.sin(rotation) + ly * Math.cos(rotation),
+    });
+  }
+  return pts;
+}
+
+function evaluateBSpline(controlPoints: Point2D[], degree: number, segments: number = 48): Point2D[] {
+  const n = controlPoints.length;
+  if (n <= 1) return [...controlPoints];
+  if (n <= degree) {
+    const pts: Point2D[] = [];
+    for (let i = 0; i <= segments; i++) {
+      const t = i / segments;
+      const pt = deCasteljau(controlPoints, t);
+      pts.push(pt);
+    }
+    return pts;
+  }
+
+  const m = n + degree + 1;
+  const knots: number[] = [];
+  for (let i = 0; i < m; i++) {
+    if (i <= degree) knots.push(0);
+    else if (i >= m - degree - 1) knots.push(1);
+    else knots.push((i - degree) / (n - degree));
+  }
+
+  const pts: Point2D[] = [];
+  for (let s = 0; s <= segments; s++) {
+    let t = s / segments;
+    if (t >= 1) t = 1 - 1e-10;
+    const pt = bsplinePoint(t, degree, controlPoints, knots);
+    pts.push(pt);
+  }
+  return pts;
+}
+
+function bsplinePoint(t: number, degree: number, controlPoints: Point2D[], knots: number[]): Point2D {
+  const n = controlPoints.length;
+  const weights = new Array(n).fill(0);
+
+  for (let i = 0; i < n; i++) {
+    weights[i] = basisFunction(i, degree, t, knots);
+  }
+
+  let x = 0, y = 0;
+  for (let i = 0; i < n; i++) {
+    x += weights[i] * controlPoints[i].x;
+    y += weights[i] * controlPoints[i].y;
+  }
+  return { x, y };
+}
+
+function basisFunction(i: number, p: number, t: number, knots: number[]): number {
+  if (p === 0) {
+    return (t >= knots[i] && t < knots[i + 1]) ? 1 : 0;
+  }
+
+  let left = 0, right = 0;
+  const denom1 = knots[i + p] - knots[i];
+  if (denom1 !== 0) {
+    left = ((t - knots[i]) / denom1) * basisFunction(i, p - 1, t, knots);
+  }
+  const denom2 = knots[i + p + 1] - knots[i + 1];
+  if (denom2 !== 0) {
+    right = ((knots[i + p + 1] - t) / denom2) * basisFunction(i + 1, p - 1, t, knots);
+  }
+  return left + right;
+}
+
+function deCasteljau(points: Point2D[], t: number): Point2D {
+  if (points.length === 1) return points[0];
+  const next: Point2D[] = [];
+  for (let i = 0; i < points.length - 1; i++) {
+    next.push({
+      x: (1 - t) * points[i].x + t * points[i + 1].x,
+      y: (1 - t) * points[i].y + t * points[i + 1].y,
+    });
+  }
+  return deCasteljau(next, t);
+}
+
 function parseDxfEntities(content: string) {
   const lines = content.split(/\r?\n/).map(l => l.trim());
   const polylines: ParsedPolyline[] = [];
@@ -62,6 +164,8 @@ function parseDxfEntities(content: string) {
   const lineSegments: { x1: number; y1: number; x2: number; y2: number }[] = [];
   const circles: { cx: number; cy: number; r: number }[] = [];
   const arcs: { cx: number; cy: number; r: number; startAngle: number; endAngle: number }[] = [];
+  const ellipses: { cx: number; cy: number; majorX: number; majorY: number; ratio: number; startParam: number; endParam: number }[] = [];
+  const splines: { degree: number; controlPoints: Point2D[]; closed: boolean }[] = [];
 
   let i = 0;
   const next = () => (i < lines.length ? lines[i++] : "");
@@ -202,6 +306,50 @@ function parseDxfEntities(content: string) {
       circles.push({ cx, cy, r });
     }
 
+    if (code === "0" && value === "ELLIPSE") {
+      let cx = 0, cy = 0, majorX = 0, majorY = 0, ratio = 1, startParam = 0, endParam = 2 * Math.PI;
+      while (i < lines.length) {
+        if (peek() === "0") break;
+        const gc = next();
+        const gv = next();
+        if (gc === "10") cx = parseFloat(gv);
+        if (gc === "20") cy = parseFloat(gv);
+        if (gc === "11") majorX = parseFloat(gv);
+        if (gc === "21") majorY = parseFloat(gv);
+        if (gc === "40") ratio = parseFloat(gv);
+        if (gc === "41") startParam = parseFloat(gv);
+        if (gc === "42") endParam = parseFloat(gv);
+      }
+      ellipses.push({ cx, cy, majorX, majorY, ratio, startParam, endParam });
+    }
+
+    if (code === "0" && value === "SPLINE") {
+      let degree = 3;
+      let closed = false;
+      const ctrlPts: Point2D[] = [];
+      let currentX: number | null = null;
+      while (i < lines.length) {
+        if (peek() === "0") break;
+        const gc = next();
+        const gv = next();
+        if (gc === "71") degree = parseInt(gv);
+        if (gc === "70") {
+          const flags = parseInt(gv);
+          closed = (flags & 1) !== 0;
+        }
+        if (gc === "10") {
+          currentX = parseFloat(gv);
+        }
+        if (gc === "20" && currentX !== null) {
+          ctrlPts.push({ x: currentX, y: parseFloat(gv) });
+          currentX = null;
+        }
+      }
+      if (ctrlPts.length >= 2) {
+        splines.push({ degree, controlPoints: ctrlPts, closed });
+      }
+    }
+
     if (code === "0" && (value === "POINT" || value === "INSERT")) {
       let px = 0, py = 0;
       while (i < lines.length) {
@@ -215,7 +363,7 @@ function parseDxfEntities(content: string) {
     }
   }
 
-  return { polylines, points, lineSegments, circles, arcs };
+  return { polylines, points, lineSegments, circles, arcs, ellipses, splines };
 }
 
 function tryBuildPolylinesFromLines(
@@ -270,7 +418,7 @@ function tryBuildPolylinesFromLines(
 }
 
 export function parseDxfFile(content: string): DxfParseResult {
-  const { polylines, points, lineSegments, circles, arcs } = parseDxfEntities(content);
+  const { polylines, points, lineSegments, circles, arcs, ellipses, splines } = parseDxfEntities(content);
 
   const arcLineSegments = arcs.flatMap(arc => {
     const pts = arcToPoints(arc.cx, arc.cy, arc.r, arc.startAngle, arc.endAngle);
@@ -281,9 +429,36 @@ export function parseDxfFile(content: string): DxfParseResult {
     return segs;
   });
 
-  const allLineSegments = [...lineSegments, ...arcLineSegments];
+  const ellipseLineSegments = ellipses.flatMap(e => {
+    const pts = ellipseToPoints(e.cx, e.cy, e.majorX, e.majorY, e.ratio, e.startParam, e.endParam);
+    const segs: { x1: number; y1: number; x2: number; y2: number }[] = [];
+    for (let k = 0; k < pts.length - 1; k++) {
+      segs.push({ x1: pts[k].x, y1: pts[k].y, x2: pts[k + 1].x, y2: pts[k + 1].y });
+    }
+    const isFullEllipse = Math.abs(e.endParam - e.startParam - 2 * Math.PI) < 0.01 ||
+                          (e.startParam === 0 && Math.abs(e.endParam - 2 * Math.PI) < 0.01);
+    if (isFullEllipse && pts.length > 2) {
+      segs.push({ x1: pts[pts.length - 1].x, y1: pts[pts.length - 1].y, x2: pts[0].x, y2: pts[0].y });
+    }
+    return segs;
+  });
+
+  const splinePolylines: ParsedPolyline[] = splines.map(s => {
+    const pts = evaluateBSpline(s.controlPoints, s.degree);
+    if (s.closed && pts.length > 2) {
+      const first = pts[0];
+      const last = pts[pts.length - 1];
+      const dist = Math.sqrt((first.x - last.x) ** 2 + (first.y - last.y) ** 2);
+      if (dist > 0.1) {
+        pts.push({ ...first });
+      }
+    }
+    return { points: pts, closed: s.closed };
+  });
+
+  const allLineSegments = [...lineSegments, ...arcLineSegments, ...ellipseLineSegments];
   const linePolylines = tryBuildPolylinesFromLines(allLineSegments);
-  const allPolylines = [...polylines, ...linePolylines];
+  const allPolylines = [...polylines, ...linePolylines, ...splinePolylines];
 
   const closedPolylines = allPolylines.filter(p => p.closed && p.points.length >= 3);
   closedPolylines.sort((a, b) => polygonArea(b.points) - polygonArea(a.points));
