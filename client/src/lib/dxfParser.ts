@@ -165,11 +165,16 @@ function deCasteljau(points: Point2D[], t: number): Point2D {
 function parseAcisSat(satText: string): Parsed3DFace[] {
   const faces: Parsed3DFace[] = [];
 
+  const isBinary = /^[\da-fA-F\s]+$/.test(satText.substring(0, 100));
+  if (isBinary) {
+    console.log("[DXF] 3DSOLID contains binary SAB data, attempting coordinate extraction");
+  }
+
   const records: string[] = [];
   let current = "";
   for (const ch of satText) {
     if (ch === "#") {
-      records.push(current.trim());
+      if (current.trim()) records.push(current.trim());
       current = "";
     } else {
       current += ch;
@@ -177,16 +182,54 @@ function parseAcisSat(satText: string): Parsed3DFace[] {
   }
   if (current.trim()) records.push(current.trim());
 
-  const pointCoords: Map<number, Point3D> = new Map();
+  console.log(`[DXF] SAT records found: ${records.length}`);
+  if (records.length > 0) {
+    console.log("[DXF] First SAT record:", records[0].substring(0, 200));
+    if (records.length > 1) console.log("[DXF] Second SAT record:", records[1].substring(0, 200));
+  }
+
+  const allExtractedPoints: Point3D[] = [];
+
+  const satEntityTypes = [
+    "point", "vertex", "straight-curve", "straight", "ellipse-curve", "intcurve-curve",
+    "plane-surface", "cone-surface", "sphere-surface", "torus-surface", "spline-surface",
+  ];
 
   const findEntityType = (tokens: string[]): { type: string; idx: number } => {
     for (let ti = 0; ti < tokens.length; ti++) {
+      const t = tokens[ti].toLowerCase();
+      if (satEntityTypes.includes(t) || t === "body" || t === "lump" || t === "shell" ||
+          t === "face" || t === "loop" || t === "coedge" || t === "edge" || t === "vertex") {
+        return { type: t, idx: ti };
+      }
+    }
+    for (let ti = 0; ti < tokens.length; ti++) {
       const t = tokens[ti];
-      if (!t.startsWith("$") && !t.startsWith("-") && !/^\d+$/.test(t) && t !== "forward" && t !== "reversed" && t !== "single" && t !== "double") {
+      if (!t.startsWith("$") && !t.startsWith("-") && !/^[\d.eE+-]+$/.test(t) &&
+          t !== "forward" && t !== "reversed" && t !== "single" && t !== "double" &&
+          t !== "in" && t !== "out" && t !== "T" && t !== "F" && t !== "I") {
         return { type: t.toLowerCase(), idx: ti };
       }
     }
     return { type: "", idx: 0 };
+  };
+
+  const extractCoordTriplets = (tokens: string[], startIdx: number): Point3D[] => {
+    const pts: Point3D[] = [];
+    const nums: number[] = [];
+    for (let ti = startIdx; ti < tokens.length; ti++) {
+      const n = parseFloat(tokens[ti]);
+      if (!isNaN(n) && isFinite(n)) {
+        nums.push(n);
+      }
+    }
+    for (let ni = 0; ni + 2 < nums.length; ni += 3) {
+      const x = nums[ni], y = nums[ni + 1], z = nums[ni + 2];
+      if (Math.abs(x) < 1e10 && Math.abs(y) < 1e10 && Math.abs(z) < 1e10) {
+        pts.push({ x, y, z });
+      }
+    }
+    return pts;
   };
 
   for (let ri = 0; ri < records.length; ri++) {
@@ -199,46 +242,66 @@ function parseAcisSat(satText: string): Parsed3DFace[] {
     const { type: entityType, idx: typeIdx } = findEntityType(tokens);
 
     if (entityType === "point") {
-      const nums: number[] = [];
-      for (let ti = typeIdx + 1; ti < tokens.length; ti++) {
-        const n = parseFloat(tokens[ti]);
-        if (!isNaN(n)) nums.push(n);
-      }
-      if (nums.length >= 3) {
-        pointCoords.set(ri, { x: nums[nums.length - 3], y: nums[nums.length - 2], z: nums[nums.length - 1] });
-      }
+      const pts = extractCoordTriplets(tokens, typeIdx + 1);
+      for (const p of pts) allExtractedPoints.push(p);
+    }
+
+    if (entityType === "vertex") {
+      const pts = extractCoordTriplets(tokens, typeIdx + 1);
+      for (const p of pts) allExtractedPoints.push(p);
     }
 
     if (entityType === "straight-curve" || entityType === "straight") {
-      const nums: number[] = [];
-      for (let ti = typeIdx + 1; ti < tokens.length; ti++) {
-        const n = parseFloat(tokens[ti]);
-        if (!isNaN(n)) nums.push(n);
-      }
-      if (nums.length >= 6) {
-        pointCoords.set(ri * 10000, { x: nums[0], y: nums[1], z: nums[2] });
-      }
+      const pts = extractCoordTriplets(tokens, typeIdx + 1);
+      if (pts.length > 0) allExtractedPoints.push(pts[0]);
+    }
+
+    if (entityType === "plane-surface") {
+      const pts = extractCoordTriplets(tokens, typeIdx + 1);
+      if (pts.length > 0) allExtractedPoints.push(pts[0]);
+    }
+
+    if (entityType === "cone-surface" || entityType === "sphere-surface" || entityType === "torus-surface") {
+      const pts = extractCoordTriplets(tokens, typeIdx + 1);
+      if (pts.length > 0) allExtractedPoints.push(pts[0]);
     }
   }
 
-  if (pointCoords.size >= 3) {
-    const allPoints = Array.from(pointCoords.values());
-
-    const vertexBuckets = new Map<string, Point3D>();
-    for (const p of allPoints) {
-      const key = `${p.x.toFixed(6)},${p.y.toFixed(6)},${p.z.toFixed(6)}`;
-      vertexBuckets.set(key, p);
-    }
-    const uniquePoints = Array.from(vertexBuckets.values());
-
-    if (uniquePoints.length >= 4) {
-      const convexFaces = convexHull3D(uniquePoints);
-      for (const f of convexFaces) {
-        faces.push(f);
+  if (allExtractedPoints.length === 0) {
+    console.log("[DXF] No point entities found in SAT, trying fallback coordinate extraction");
+    const allNums: number[] = [];
+    const fullText = records.join(" ");
+    const numRegex = /-?\d+\.?\d*(?:[eE][+-]?\d+)?/g;
+    let match;
+    while ((match = numRegex.exec(fullText)) !== null) {
+      const n = parseFloat(match[0]);
+      if (!isNaN(n) && isFinite(n) && Math.abs(n) < 1e10 && Math.abs(n) > 1e-10) {
+        allNums.push(n);
       }
-    } else if (uniquePoints.length === 3) {
-      faces.push({ vertices: [uniquePoints[0], uniquePoints[1], uniquePoints[2]] });
     }
+    for (let ni = 0; ni + 2 < allNums.length; ni += 3) {
+      allExtractedPoints.push({ x: allNums[ni], y: allNums[ni + 1], z: allNums[ni + 2] });
+    }
+  }
+
+  console.log(`[DXF] Extracted ${allExtractedPoints.length} coordinate points from ACIS data`);
+
+  const vertexBuckets = new Map<string, Point3D>();
+  for (const p of allExtractedPoints) {
+    const key = `${p.x.toFixed(4)},${p.y.toFixed(4)},${p.z.toFixed(4)}`;
+    vertexBuckets.set(key, p);
+  }
+  const uniquePoints = Array.from(vertexBuckets.values());
+
+  console.log(`[DXF] Unique points after dedup: ${uniquePoints.length}`);
+
+  if (uniquePoints.length >= 4) {
+    const convexFaces = convexHull3D(uniquePoints);
+    for (const f of convexFaces) {
+      faces.push(f);
+    }
+  } else if (uniquePoints.length === 3) {
+    faces.push({ vertices: [uniquePoints[0], uniquePoints[1], uniquePoints[2]] });
   }
 
   return faces;
@@ -367,6 +430,7 @@ function parseDxfEntities(content: string) {
   const peek = () => (i < lines.length ? lines[i] : "");
 
   let inEntities = false;
+  let inBlocks = false;
 
   while (i < lines.length) {
     const code = next();
@@ -377,11 +441,18 @@ function parseDxfEntities(content: string) {
       continue;
     }
 
-    if (code === "0" && value === "ENDSEC" && inEntities) {
-      break;
+    if (code === "2" && value === "BLOCKS") {
+      inBlocks = true;
+      continue;
     }
 
-    if (!inEntities) continue;
+    if (code === "0" && value === "ENDSEC" && (inEntities || inBlocks)) {
+      if (inEntities) break;
+      inBlocks = false;
+      continue;
+    }
+
+    if (!inEntities && !inBlocks) continue;
 
     if (code === "0" && value === "LWPOLYLINE") {
       const pts: Point2D[] = [];
@@ -725,6 +796,7 @@ function parseDxfEntities(content: string) {
     }
 
     if (code === "0" && (value === "3DSOLID" || value === "BODY" || value === "REGION")) {
+      console.log(`[DXF] Found ${value} entity`);
       const satLines: string[] = [];
       while (i < lines.length) {
         if (peek() === "0") break;
@@ -734,12 +806,17 @@ function parseDxfEntities(content: string) {
           satLines.push(gv);
         }
       }
+      console.log(`[DXF] ${value}: collected ${satLines.length} SAT data lines`);
       if (satLines.length > 0) {
-        const satText = satLines.join("\n");
+        console.log("[DXF] First SAT line:", satLines[0].substring(0, 120));
+        const satText = satLines.join("");
         const satFaces = parseAcisSat(satText);
+        console.log(`[DXF] ${value}: parsed ${satFaces.length} faces from ACIS data`);
         for (const f of satFaces) {
           faces3d.push(f);
         }
+      } else {
+        console.log(`[DXF] ${value}: No SAT data found (group codes 1/3 missing)`);
       }
     }
 
