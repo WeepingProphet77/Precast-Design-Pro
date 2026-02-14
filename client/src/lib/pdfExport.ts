@@ -1,7 +1,7 @@
 
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { ProjectData, Panel, ConnectionNode } from "./types";
+import { ProjectData, Panel, ConnectionNode, Solid3DData, Point3D, Face3D } from "./types";
 import { calculateLoadCombinations } from "./calculations";
 
 const MARGIN = 20;
@@ -152,6 +152,84 @@ function drawPolygon(doc: jsPDF, points: number[][], style: "F" | "S" | "FD" = "
   }
   deltas.push([points[0][0] - points[points.length - 1][0], points[0][1] - points[points.length - 1][1]]);
   doc.lines(deltas, points[0][0], points[0][1], [1, 1], style, true);
+}
+
+function projectIsometric(p: Point3D, cx: number, cy: number, cz: number): { x: number; y: number; depth: number } {
+  const rx = p.x - cx;
+  const ry = p.y - cy;
+  const rz = p.z - cz;
+  const angle = Math.PI / 6;
+  const px = (rx - rz) * Math.cos(angle);
+  const py = -ry + (rx + rz) * Math.sin(angle);
+  return { x: px, y: py, depth: rx + ry + rz };
+}
+
+function faceNormalZ(verts: Point3D[], cx: number, cy: number, cz: number): number {
+  if (verts.length < 3) return 0;
+  const p0 = projectIsometric(verts[0], cx, cy, cz);
+  const p1 = projectIsometric(verts[1], cx, cy, cz);
+  const p2 = projectIsometric(verts[2], cx, cy, cz);
+  return (p1.x - p0.x) * (p2.y - p0.y) - (p1.y - p0.y) * (p2.x - p0.x);
+}
+
+function drawIsometric3D(doc: jsPDF, solid3d: Solid3DData, x: number, y: number, maxW: number, maxH: number) {
+  const { min, max } = solid3d.bounds;
+  const cx = (min.x + max.x) / 2;
+  const cy = (min.y + max.y) / 2;
+  const cz = (min.z + max.z) / 2;
+
+  let projMinX = Infinity, projMinY = Infinity, projMaxX = -Infinity, projMaxY = -Infinity;
+  const allPoints: Point3D[] = [];
+  solid3d.faces.forEach(f => f.vertices.forEach(v => allPoints.push(v)));
+  solid3d.edges.forEach(e => { allPoints.push(e.start); allPoints.push(e.end); });
+
+  for (const p of allPoints) {
+    const proj = projectIsometric(p, cx, cy, cz);
+    projMinX = Math.min(projMinX, proj.x);
+    projMinY = Math.min(projMinY, proj.y);
+    projMaxX = Math.max(projMaxX, proj.x);
+    projMaxY = Math.max(projMaxY, proj.y);
+  }
+
+  const pw = projMaxX - projMinX || 1;
+  const ph = projMaxY - projMinY || 1;
+  const scale = Math.min((maxW - 30) / pw, (maxH - 30) / ph);
+  const ox = x + (maxW - pw * scale) / 2 - projMinX * scale;
+  const oy = y + (maxH - ph * scale) / 2 - projMinY * scale;
+
+  const sortedFaces = [...solid3d.faces].sort((a, b) => {
+    const da = a.vertices.reduce((s, v) => s + v.x + v.y + v.z, 0) / a.vertices.length;
+    const db = b.vertices.reduce((s, v) => s + v.x + v.y + v.z, 0) / b.vertices.length;
+    return da - db;
+  });
+
+  for (const face of sortedFaces) {
+    const nz = faceNormalZ(face.vertices, cx, cy, cz);
+    const projected = face.vertices.map(v => {
+      const p = projectIsometric(v, cx, cy, cz);
+      return [ox + p.x * scale, oy + p.y * scale];
+    });
+
+    if (projected.length >= 3) {
+      const brightness = Math.min(255, Math.max(180, 210 + Math.round(nz * 0.0005)));
+      doc.setFillColor(brightness, brightness + 5, brightness + 15);
+      doc.setDrawColor(...COLORS.primary);
+      doc.setLineWidth(0.3);
+      drawPolygon(doc, projected, "FD");
+    }
+  }
+
+  doc.setDrawColor(...COLORS.primary);
+  doc.setLineWidth(0.5);
+  for (const edge of solid3d.edges) {
+    const p1 = projectIsometric(edge.start, cx, cy, cz);
+    const p2 = projectIsometric(edge.end, cx, cy, cz);
+    doc.line(ox + p1.x * scale, oy + p1.y * scale, ox + p2.x * scale, oy + p2.y * scale);
+  }
+
+  doc.setFontSize(7);
+  doc.setTextColor(...COLORS.muted);
+  doc.text("Isometric View", x + maxW / 2, y + maxH - 4, { align: "center" });
 }
 
 function drawPanelGeometry(doc: jsPDF, panel: Panel, x: number, y: number, maxW: number, maxH: number) {
@@ -310,10 +388,29 @@ function generatePanelPage(doc: jsPDF, project: ProjectData, panel: Panel) {
 
   y = Math.max(y, y2) + 6;
 
+  const has3D = panel.solid3d && panel.solid3d.faces.length > 0;
+
+  if (has3D && panel.solid3d) {
+    y = drawSectionTitle(doc, "3D ISOMETRIC VIEW", y);
+    y += 4;
+    const isoH = 200;
+    doc.setDrawColor(...COLORS.medGray);
+    doc.setLineWidth(0.3);
+    doc.rect(MARGIN, y, CONTENT_W, isoH);
+    drawIsometric3D(doc, panel.solid3d, MARGIN, y, CONTENT_W, isoH);
+    y += isoH + 10;
+
+    if (y > PAGE_H - 250) {
+      doc.addPage();
+      drawHeader(doc, project);
+      y = 56;
+    }
+  }
+
   y = drawSectionTitle(doc, "PANEL GEOMETRY & CONNECTIONS", y);
   y += 4;
 
-  const geomH = 180;
+  const geomH = has3D ? 140 : 180;
   doc.setDrawColor(...COLORS.medGray);
   doc.setLineWidth(0.3);
   doc.rect(MARGIN, y, CONTENT_W, geomH);
