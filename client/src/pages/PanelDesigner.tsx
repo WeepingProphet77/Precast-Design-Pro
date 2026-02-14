@@ -12,8 +12,9 @@ import { calculateCentroid } from "@/lib/centroid";
 import { parseDxfFile } from "@/lib/dxfParser";
 import {
   Plus, Trash2, ZoomIn, ZoomOut, MousePointer2, Upload, Square as SquareIcon,
-  ArrowUpRight, Crosshair, RotateCcw
+  ArrowUpRight, Crosshair, RotateCcw, Box, Layers
 } from "lucide-react";
+import ThreeViewer from "@/components/ThreeViewer";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -49,6 +50,8 @@ export default function PanelDesigner() {
   const [coordDialogOpen, setCoordDialogOpen] = useState(false);
   const [coordX, setCoordX] = useState(0);
   const [coordY, setCoordY] = useState(0);
+  const [viewMode, setViewMode] = useState<"2d" | "3d">("2d");
+  const [viewerSize, setViewerSize] = useState({ width: 800, height: 600 });
 
   const SNAP_TOLERANCE = 10;
   const GRID_SPACING = 12;
@@ -133,28 +136,41 @@ export default function PanelDesigner() {
     const text = await file.text();
     try {
       const result = parseDxfFile(text);
-      if (result.perimeter.length < 3) {
-        toast({ title: "Import Warning", description: "No valid closed polyline found in the DXF file. Please ensure the file contains closed polylines.", variant: "destructive" });
+      const has3dData = result.solid3d && result.solid3d.faces.length > 0;
+      if (result.perimeter.length < 3 && !has3dData) {
+        toast({ title: "Import Warning", description: "No valid closed polyline or 3D faces found in the DXF file.", variant: "destructive" });
         return;
       }
 
       if (activePanel) {
-        const centroid = calculateCentroid(
-          result.perimeter,
-          result.openings
-        );
+        let w = result.width;
+        let h = result.height;
+        if (w === 0 && h === 0 && has3dData && result.solid3d) {
+          const b = result.solid3d.bounds;
+          w = Math.round((b.max.x - b.min.x) * 1000) / 1000;
+          h = Math.round((b.max.y - b.min.y) * 1000) / 1000;
+        }
+        const centroid = result.perimeter.length >= 3
+          ? calculateCentroid(result.perimeter, result.openings)
+          : { x: w / 2, y: h / 2 };
         updatePanel({
           ...activePanel,
-          width: result.width,
-          height: result.height,
+          width: w,
+          height: h,
           perimeter: result.perimeter,
           openings: result.openings,
           sketchLines: result.sketchLines.map(l => ({ id: crypto.randomUUID(), ...l })),
           importedNodes: result.nodes,
           centroidX: centroid.x,
           centroidY: centroid.y,
+          solid3d: result.solid3d,
         });
-        toast({ title: "DXF Imported", description: `Imported panel ${result.width.toFixed(1)}" × ${result.height.toFixed(1)}" with ${result.openings.length} opening(s).` });
+        if (has3dData) {
+          setViewMode("3d");
+          toast({ title: "3D DXF Imported", description: `Imported 3D solid with ${result.solid3d!.faces.length} faces. Switched to 3D view.` });
+        } else {
+          toast({ title: "DXF Imported", description: `Imported panel ${w.toFixed(1)}" × ${h.toFixed(1)}" with ${result.openings.length} opening(s).` });
+        }
       }
     } catch (err: any) {
       toast({ title: "Import Error", description: err.message || "Failed to parse DXF file.", variant: "destructive" });
@@ -532,6 +548,32 @@ export default function PanelDesigner() {
 
         <div className="flex-1" />
 
+        {activePanel?.solid3d && activePanel.solid3d.faces.length > 0 && (
+          <>
+            <Separator orientation="vertical" className="h-6" />
+            <div className="flex items-center gap-1 bg-muted rounded-md p-0.5">
+              <Button
+                variant={viewMode === "2d" ? "default" : "ghost"}
+                size="sm"
+                onClick={() => setViewMode("2d")}
+                className="h-8 px-3"
+                data-testid="button-view-2d"
+              >
+                <Layers className="w-4 h-4 mr-1" /> 2D
+              </Button>
+              <Button
+                variant={viewMode === "3d" ? "default" : "ghost"}
+                size="sm"
+                onClick={() => setViewMode("3d")}
+                className="h-8 px-3"
+                data-testid="button-view-3d"
+              >
+                <Box className="w-4 h-4 mr-1" /> 3D
+              </Button>
+            </div>
+          </>
+        )}
+
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="icon" onClick={() => setScale(s => Math.min(s * 1.2, 20))} data-testid="button-zoom-in"><ZoomIn className="w-4 h-4" /></Button>
           <span className="text-xs text-muted-foreground font-mono w-12 text-center">{Math.round(scale * 100 / 3)}%</span>
@@ -542,6 +584,28 @@ export default function PanelDesigner() {
 
       <div className="flex-1 flex overflow-hidden">
         <div className="flex-1 flex flex-col min-w-0 bg-slate-100 relative">
+          {viewMode === "3d" && activePanel?.solid3d && activePanel.solid3d.faces.length > 0 ? (
+            <>
+              <div className="absolute top-3 left-3 z-10 bg-background/90 backdrop-blur-sm border rounded-md px-3 py-1.5 shadow-sm text-xs font-mono" data-testid="text-3d-info">
+                3D View — {activePanel.solid3d.faces.length} faces — Drag to orbit, scroll to zoom
+              </div>
+              <div className="flex-1 overflow-hidden" ref={(el) => {
+                if (el) {
+                  const rect = el.getBoundingClientRect();
+                  if (rect.width !== viewerSize.width || rect.height !== viewerSize.height) {
+                    setViewerSize({ width: Math.floor(rect.width), height: Math.floor(rect.height) });
+                  }
+                }
+              }}>
+                <ThreeViewer
+                  solid3d={activePanel.solid3d}
+                  width={viewerSize.width}
+                  height={viewerSize.height}
+                />
+              </div>
+            </>
+          ) : (
+          <>
           <div className="absolute top-3 left-3 z-10 bg-background/90 backdrop-blur-sm border rounded-md px-3 py-1.5 shadow-sm text-xs font-mono" data-testid="text-coordinates">
             X: {currentMousePos?.x?.toFixed(1) ?? "—"}" &nbsp; Y: {currentMousePos?.y?.toFixed(1) ?? "—"}"
           </div>
@@ -772,6 +836,8 @@ export default function PanelDesigner() {
               : `${activePanel.name} — No geometry defined`
             }
           </div>
+          </>
+          )}
         </div>
 
         <div className="w-[340px] border-l bg-card flex flex-col shrink-0 shadow-sm z-10">

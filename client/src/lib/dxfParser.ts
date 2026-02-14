@@ -1,5 +1,5 @@
 
-import { Vertex, Opening } from "./types";
+import { Vertex, Opening, Point3D, Face3D, Solid3DData } from "./types";
 
 interface Point2D {
   x: number;
@@ -11,6 +11,10 @@ interface ParsedPolyline {
   closed: boolean;
 }
 
+interface Parsed3DFace {
+  vertices: Point3D[];
+}
+
 interface DxfParseResult {
   perimeter: Vertex[];
   openings: Opening[];
@@ -18,6 +22,7 @@ interface DxfParseResult {
   sketchLines: { x1: number; y1: number; x2: number; y2: number }[];
   width: number;
   height: number;
+  solid3d?: Solid3DData;
 }
 
 function polygonArea(pts: Point2D[]): number {
@@ -166,6 +171,7 @@ function parseDxfEntities(content: string) {
   const arcs: { cx: number; cy: number; r: number; startAngle: number; endAngle: number }[] = [];
   const ellipses: { cx: number; cy: number; majorX: number; majorY: number; ratio: number; startParam: number; endParam: number }[] = [];
   const splines: { degree: number; controlPoints: Point2D[]; closed: boolean }[] = [];
+  const faces3d: Parsed3DFace[] = [];
 
   let i = 0;
   const next = () => (i < lines.length ? lines[i++] : "");
@@ -350,6 +356,123 @@ function parseDxfEntities(content: string) {
       }
     }
 
+    if (code === "0" && value === "3DFACE") {
+      const verts: Point3D[] = [
+        { x: 0, y: 0, z: 0 },
+        { x: 0, y: 0, z: 0 },
+        { x: 0, y: 0, z: 0 },
+        { x: 0, y: 0, z: 0 },
+      ];
+      while (i < lines.length) {
+        if (peek() === "0") break;
+        const gc = next();
+        const gv = next();
+        if (gc === "10") verts[0].x = parseFloat(gv);
+        if (gc === "20") verts[0].y = parseFloat(gv);
+        if (gc === "30") verts[0].z = parseFloat(gv);
+        if (gc === "11") verts[1].x = parseFloat(gv);
+        if (gc === "21") verts[1].y = parseFloat(gv);
+        if (gc === "31") verts[1].z = parseFloat(gv);
+        if (gc === "12") verts[2].x = parseFloat(gv);
+        if (gc === "22") verts[2].y = parseFloat(gv);
+        if (gc === "32") verts[2].z = parseFloat(gv);
+        if (gc === "13") verts[3].x = parseFloat(gv);
+        if (gc === "23") verts[3].y = parseFloat(gv);
+        if (gc === "33") verts[3].z = parseFloat(gv);
+      }
+      const v3 = verts[2];
+      const v4 = verts[3];
+      const isTri = Math.abs(v3.x - v4.x) < 1e-6 && Math.abs(v3.y - v4.y) < 1e-6 && Math.abs(v3.z - v4.z) < 1e-6;
+      faces3d.push({ vertices: isTri ? [verts[0], verts[1], verts[2]] : verts });
+    }
+
+    if (code === "0" && value === "MESH") {
+      const meshVerts: Point3D[] = [];
+      const meshFaceIndices: number[][] = [];
+      let mRows = 0, nCols = 0;
+      let vertexCount = 0;
+      let faceListSize = 0;
+      let readingVertices = false;
+      let readingFaces = false;
+      let vertsCollected = 0;
+      let faceDataCollected = 0;
+      let currentVert: Point3D = { x: 0, y: 0, z: 0 };
+      let hasX = false;
+      while (i < lines.length) {
+        if (peek() === "0") break;
+        const gc = next();
+        const gv = next();
+        if (gc === "71") mRows = parseInt(gv);
+        if (gc === "72") nCols = parseInt(gv);
+        if (gc === "92") {
+          vertexCount = parseInt(gv);
+          readingVertices = true;
+          readingFaces = false;
+          vertsCollected = 0;
+          continue;
+        }
+        if (gc === "93") {
+          faceListSize = parseInt(gv);
+          readingVertices = false;
+          readingFaces = true;
+          faceDataCollected = 0;
+          continue;
+        }
+        if (readingVertices && vertsCollected < vertexCount) {
+          if (gc === "10") {
+            currentVert = { x: parseFloat(gv), y: 0, z: 0 };
+            hasX = true;
+          } else if (gc === "20" && hasX) {
+            currentVert.y = parseFloat(gv);
+          } else if (gc === "30" && hasX) {
+            currentVert.z = parseFloat(gv);
+            meshVerts.push({ ...currentVert });
+            vertsCollected++;
+            hasX = false;
+          }
+        }
+        if (readingFaces && faceDataCollected < faceListSize) {
+          if (gc === "90") {
+            if (meshFaceIndices.length === 0 || meshFaceIndices[meshFaceIndices.length - 1].length > 0) {
+              meshFaceIndices.push([]);
+            }
+            faceDataCollected++;
+          } else if (gc === "91") {
+            const idx = parseInt(gv);
+            if (meshFaceIndices.length > 0) {
+              meshFaceIndices[meshFaceIndices.length - 1].push(Math.abs(idx));
+            }
+            faceDataCollected++;
+          }
+        }
+      }
+      if (meshVerts.length >= 3) {
+        if (meshFaceIndices.length > 0) {
+          meshFaceIndices.forEach(indices => {
+            if (indices.length >= 3) {
+              const fv = indices.map(idx => meshVerts[idx] || { x: 0, y: 0, z: 0 });
+              for (let ti = 1; ti < fv.length - 1; ti++) {
+                faces3d.push({ vertices: [fv[0], fv[ti], fv[ti + 1]] });
+              }
+            }
+          });
+        } else if (mRows > 0 && nCols > 0) {
+          for (let r = 0; r < mRows - 1; r++) {
+            for (let c = 0; c < nCols - 1; c++) {
+              const i0 = r * nCols + c;
+              const i1 = r * nCols + c + 1;
+              const i2 = (r + 1) * nCols + c + 1;
+              const i3 = (r + 1) * nCols + c;
+              if (i0 < meshVerts.length && i1 < meshVerts.length && i2 < meshVerts.length && i3 < meshVerts.length) {
+                faces3d.push({ vertices: [meshVerts[i0], meshVerts[i1], meshVerts[i2]] });
+                faces3d.push({ vertices: [meshVerts[i0], meshVerts[i2], meshVerts[i3]] });
+              }
+            }
+          }
+        }
+      }
+    }
+
     if (code === "0" && (value === "POINT" || value === "INSERT")) {
       let px = 0, py = 0;
       while (i < lines.length) {
@@ -363,7 +486,7 @@ function parseDxfEntities(content: string) {
     }
   }
 
-  return { polylines, points, lineSegments, circles, arcs, ellipses, splines };
+  return { polylines, points, lineSegments, circles, arcs, ellipses, splines, faces3d };
 }
 
 function tryBuildPolylinesFromLines(
@@ -417,8 +540,61 @@ function tryBuildPolylinesFromLines(
   return result;
 }
 
+function build3DData(faces: Parsed3DFace[]): Solid3DData | undefined {
+  if (faces.length === 0) return undefined;
+
+  const min: Point3D = { x: Infinity, y: Infinity, z: Infinity };
+  const max: Point3D = { x: -Infinity, y: -Infinity, z: -Infinity };
+
+  const solidFaces: Face3D[] = [];
+  const edgeSet = new Set<string>();
+  const edges: { start: Point3D; end: Point3D }[] = [];
+
+  const edgeKey = (a: Point3D, b: Point3D) => {
+    const ax = a.x.toFixed(4), ay = a.y.toFixed(4), az = a.z.toFixed(4);
+    const bx = b.x.toFixed(4), by = b.y.toFixed(4), bz = b.z.toFixed(4);
+    return `${ax},${ay},${az}-${bx},${by},${bz}`;
+  };
+
+  for (const f of faces) {
+    for (const v of f.vertices) {
+      min.x = Math.min(min.x, v.x);
+      min.y = Math.min(min.y, v.y);
+      min.z = Math.min(min.z, v.z);
+      max.x = Math.max(max.x, v.x);
+      max.y = Math.max(max.y, v.y);
+      max.z = Math.max(max.z, v.z);
+    }
+
+    if (f.vertices.length === 3) {
+      solidFaces.push({ vertices: [f.vertices[0], f.vertices[1], f.vertices[2]] });
+    } else if (f.vertices.length === 4) {
+      solidFaces.push({ vertices: [f.vertices[0], f.vertices[1], f.vertices[2], f.vertices[3]] });
+    }
+
+    for (let ei = 0; ei < f.vertices.length; ei++) {
+      const a = f.vertices[ei];
+      const b = f.vertices[(ei + 1) % f.vertices.length];
+      const k1 = edgeKey(a, b);
+      const k2 = edgeKey(b, a);
+      if (!edgeSet.has(k1) && !edgeSet.has(k2)) {
+        edgeSet.add(k1);
+        edges.push({ start: a, end: b });
+      }
+    }
+  }
+
+  if (!isFinite(min.x)) return undefined;
+
+  return {
+    faces: solidFaces,
+    edges,
+    bounds: { min, max },
+  };
+}
+
 export function parseDxfFile(content: string): DxfParseResult {
-  const { polylines, points, lineSegments, circles, arcs, ellipses, splines } = parseDxfEntities(content);
+  const { polylines, points, lineSegments, circles, arcs, ellipses, splines, faces3d } = parseDxfEntities(content);
 
   const arcLineSegments = arcs.flatMap(arc => {
     const pts = arcToPoints(arc.cx, arc.cy, arc.r, arc.startAngle, arc.endAngle);
@@ -569,5 +745,7 @@ export function parseDxfFile(content: string): DxfParseResult {
   const width = round3(maxX - minX);
   const height = round3(maxY - minY);
 
-  return { perimeter, openings, nodes, sketchLines, width, height };
+  const solid3d = build3DData(faces3d);
+
+  return { perimeter, openings, nodes, sketchLines, width, height, solid3d };
 }
