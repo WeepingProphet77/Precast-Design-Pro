@@ -521,6 +521,7 @@ function parseDxfEntities(content: string) {
   const ellipses: { cx: number; cy: number; majorX: number; majorY: number; ratio: number; startParam: number; endParam: number }[] = [];
   const splines: { degree: number; controlPoints: Point2D[]; closed: boolean }[] = [];
   const faces3d: Parsed3DFace[] = [];
+  const solid3dHandles: string[] = [];
 
   let i = 0;
   const next = () => (i < lines.length ? lines[i++] : "");
@@ -897,6 +898,8 @@ function parseDxfEntities(content: string) {
       const satLines: string[] = [];
       const binaryChunks: string[] = [];
       const allGroupCodes: string[] = [];
+      let historyHandle = "";
+      let entityHandle = "";
       while (i < lines.length) {
         if (peek() === "0") break;
         const gc = next();
@@ -908,9 +911,15 @@ function parseDxfEntities(content: string) {
         if (gc === "310") {
           binaryChunks.push(gv);
         }
+        if (gc === "350") {
+          historyHandle = gv;
+        }
+        if (gc === "5") {
+          entityHandle = gv;
+        }
       }
       const uniqueCodes = Array.from(new Set(allGroupCodes));
-      console.log(`[DXF] ${value}: SAT lines=${satLines.length}, binary chunks=${binaryChunks.length}, group codes seen: [${uniqueCodes.join(",")}]`);
+      console.log(`[DXF] ${value}: SAT lines=${satLines.length}, binary chunks=${binaryChunks.length}, handle=${entityHandle}, histRef=${historyHandle}, codes=[${uniqueCodes.join(",")}]`);
 
       if (satLines.length > 0) {
         const satText = satLines.join("");
@@ -927,7 +936,8 @@ function parseDxfEntities(content: string) {
           faces3d.push(f);
         }
       } else {
-        console.log(`[DXF] ${value}: No geometry data found`);
+        console.log(`[DXF] ${value}: No inline geometry - will search OBJECTS section`);
+        solid3dHandles.push(entityHandle || historyHandle);
       }
     }
 
@@ -941,6 +951,66 @@ function parseDxfEntities(content: string) {
         if (gc === "20") py = parseFloat(gv);
       }
       points.push({ x: px, y: py });
+    }
+  }
+
+  if (solid3dHandles.length > 0 && faces3d.length === 0) {
+    console.log(`[DXF] Searching OBJECTS section for ACIS data (handles: ${solid3dHandles.join(",")})`);
+    let inObjects = false;
+    while (i < lines.length) {
+      const oc = next();
+      const ov = next();
+      if (oc === "2" && ov === "OBJECTS") {
+        inObjects = true;
+        continue;
+      }
+      if (oc === "0" && ov === "ENDSEC" && inObjects) break;
+      if (!inObjects) continue;
+
+      if (oc === "0") {
+        const objSatLines: string[] = [];
+        const objBinaryChunks: string[] = [];
+        let objHandle = "";
+        let ownerHandle = "";
+        const objGroupCodes: string[] = [];
+        while (i < lines.length) {
+          if (peek() === "0") break;
+          const gc = next();
+          const gv = next();
+          objGroupCodes.push(gc);
+          if (gc === "1" || gc === "3") objSatLines.push(gv);
+          if (gc === "310") objBinaryChunks.push(gv);
+          if (gc === "5") objHandle = gv;
+          if (gc === "330") ownerHandle = gv;
+        }
+
+        if (objSatLines.length > 0 || objBinaryChunks.length > 0) {
+          console.log(`[DXF] OBJECTS: found entity type=${ov}, handle=${objHandle}, owner=${ownerHandle}, SAT=${objSatLines.length}, binary=${objBinaryChunks.length}`);
+          if (objSatLines.length > 0) {
+            const satText = objSatLines.join("");
+            const satFaces = parseAcisSat(satText);
+            for (const f of satFaces) faces3d.push(f);
+          } else if (objBinaryChunks.length > 0) {
+            const sabFaces = parseSabBinary(objBinaryChunks);
+            for (const f of sabFaces) faces3d.push(f);
+          }
+        }
+      }
+    }
+
+    if (faces3d.length === 0) {
+      console.log("[DXF] No ACIS data found in OBJECTS section either, doing full file scan for binary data");
+      const fullBinaryChunks: string[] = [];
+      for (let si = 0; si < lines.length - 1; si++) {
+        if (lines[si].trim() === "310") {
+          fullBinaryChunks.push(lines[si + 1].trim());
+        }
+      }
+      if (fullBinaryChunks.length > 0) {
+        console.log(`[DXF] Full scan found ${fullBinaryChunks.length} binary chunks (code 310)`);
+        const sabFaces = parseSabBinary(fullBinaryChunks);
+        for (const f of sabFaces) faces3d.push(f);
+      }
     }
   }
 
