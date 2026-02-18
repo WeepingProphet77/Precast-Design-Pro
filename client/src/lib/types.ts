@@ -104,6 +104,7 @@ export interface Solid3DData {
   faces: Face3D[];
   edges: { start: Point3D; end: Point3D }[];
   bounds: { min: Point3D; max: Point3D };
+  profileLoops?: Point3D[][];
 }
 
 export interface ConnectionCapacity {

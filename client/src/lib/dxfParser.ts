@@ -188,8 +188,14 @@ function isEncodedAcis(text: string): boolean {
          lower.includes('sphere') || lower.includes('torus');
 }
 
-function parseAcisSat(satText: string, extrusionHeight: number = 0): Parsed3DFace[] {
+interface AcisResult {
+  faces: Parsed3DFace[];
+  profileLoops: Point3D[][];
+}
+
+function parseAcisSat(satText: string, extrusionHeight: number = 0): AcisResult {
   const faces: Parsed3DFace[] = [];
+  let faceLoops: Point3D[][] = [];
 
   const isBinary = /^[\da-fA-F\s]+$/.test(satText.substring(0, 100));
   if (isBinary) {
@@ -434,7 +440,7 @@ function parseAcisSat(satText: string, extrusionHeight: number = 0): Parsed3DFac
       currentLoop = nextLoop;
     }
 
-    const faceLoops: Point3D[][] = [];
+    faceLoops = [];
     for (const li of allLoops) {
       const loopEnt = getEntity(li);
       if (!loopEnt) continue;
@@ -673,7 +679,7 @@ function parseAcisSat(satText: string, extrusionHeight: number = 0): Parsed3DFac
   }
 
   console.log(`[DXF] parseAcisSat produced ${faces.length} triangle faces`);
-  return faces;
+  return { faces, profileLoops: faceLoops || [] };
 }
 
 function sortPointsCCW(pts: { x: number; y: number }[]): { x: number; y: number }[] {
@@ -935,6 +941,7 @@ function parseDxfEntities(content: string) {
   const splines: { degree: number; controlPoints: Point2D[]; closed: boolean }[] = [];
   const faces3d: Parsed3DFace[] = [];
   const solid3dHandles: string[] = [];
+  let acisProfileLoops: Point3D[][] = [];
 
   let i = 0;
   const next = () => (i < lines.length ? lines[i++] : "");
@@ -1336,11 +1343,12 @@ function parseDxfEntities(content: string) {
 
       if (satLines.length > 0) {
         const satText = satLines.join("\n");
-        const satFaces = parseAcisSat(satText);
-        console.log(`[DXF] ${value}: parsed ${satFaces.length} faces from SAT text`);
-        for (const f of satFaces) {
+        const satResult = parseAcisSat(satText);
+        console.log(`[DXF] ${value}: parsed ${satResult.faces.length} faces from SAT text`);
+        for (const f of satResult.faces) {
           faces3d.push(f);
         }
+        if (satResult.profileLoops.length > 0) acisProfileLoops = satResult.profileLoops;
       } else if (binaryChunks.length > 0) {
         console.log(`[DXF] ${value}: has binary SAB data (${binaryChunks.length} chunks)`);
         const sabFaces = parseSabBinary(binaryChunks);
@@ -1422,9 +1430,10 @@ function parseDxfEntities(content: string) {
           console.log(`[DXF] OBJECTS: found ACIS entity type=${ov}, handle=${objHandle}, owner=${ownerHandle}, SAT=${objSatLines.length}, binary=${objBinaryChunks.length}, height=${extrusionHeight}, dir=(${dirX},${dirY},${dirZ}), numericCodes=${JSON.stringify(numericCodes)}`);
           if (objSatLines.length > 0) {
             const satText = objSatLines.join("\n");
-            const satFaces = parseAcisSat(satText, extrusionHeight);
-            console.log(`[DXF] ACIS entity ${ov}: parsed ${satFaces.length} faces`);
-            for (const f of satFaces) faces3d.push(f);
+            const satResult = parseAcisSat(satText, extrusionHeight);
+            console.log(`[DXF] ACIS entity ${ov}: parsed ${satResult.faces.length} faces`);
+            for (const f of satResult.faces) faces3d.push(f);
+            if (satResult.profileLoops.length > 0) acisProfileLoops = satResult.profileLoops;
           } else if (objBinaryChunks.length > 0) {
             const sabFaces = parseSabBinary(objBinaryChunks);
             for (const f of sabFaces) faces3d.push(f);
@@ -1434,7 +1443,7 @@ function parseDxfEntities(content: string) {
     }
   }
 
-  return { polylines, points, lineSegments, circles, arcs, ellipses, splines, faces3d };
+  return { polylines, points, lineSegments, circles, arcs, ellipses, splines, faces3d, acisProfileLoops };
 }
 
 function tryBuildPolylinesFromLines(
@@ -1542,7 +1551,7 @@ function build3DData(faces: Parsed3DFace[]): Solid3DData | undefined {
 }
 
 export function parseDxfFile(content: string): DxfParseResult {
-  const { polylines, points, lineSegments, circles, arcs, ellipses, splines, faces3d } = parseDxfEntities(content);
+  const { polylines, points, lineSegments, circles, arcs, ellipses, splines, faces3d, acisProfileLoops } = parseDxfEntities(content);
 
   const arcLineSegments = arcs.flatMap(arc => {
     const pts = arcToPoints(arc.cx, arc.cy, arc.r, arc.startAngle, arc.endAngle);
@@ -1695,152 +1704,49 @@ export function parseDxfFile(content: string): DxfParseResult {
 
   const solid3d = build3DData(faces3d);
 
-  if (perimeter.length < 3 && solid3d && solid3d.faces.length > 0) {
-    const b = solid3d.bounds;
-    const sx = b.min.x;
-    const sy = b.min.y;
+  if (perimeter.length < 3 && acisProfileLoops.length > 0) {
+    const calcArea = (pts: { x: number; y: number }[]) =>
+      Math.abs(pts.reduce((s, p, idx) => {
+        const np = pts[(idx + 1) % pts.length];
+        return s + (p.x * np.y - np.x * p.y);
+      }, 0)) / 2;
 
-    const faceVerts = solid3d.faces.flatMap(f => f.vertices);
-    const uniqueXY = new Map<string, { x: number; y: number }>();
-    for (const v of faceVerts) {
-      const key = `${Math.round(v.x * 100)},${Math.round(v.y * 100)}`;
-      if (!uniqueXY.has(key)) uniqueXY.set(key, { x: v.x, y: v.y });
+    const loops2D = acisProfileLoops.map(loop => loop.map(p => ({ x: p.x, y: p.y })));
+    loops2D.sort((a, b) => calcArea(b) - calcArea(a));
+
+    const outerPts = loops2D[0];
+    const r3 = (n: number) => Math.round(n * 1000) / 1000;
+    const oMinX = Math.min(...outerPts.map(p => p.x));
+    const oMinY = Math.min(...outerPts.map(p => p.y));
+
+    perimeter.length = 0;
+    for (const p of outerPts) {
+      perimeter.push({ id: crypto.randomUUID(), x: r3(p.x - oMinX), y: r3(p.y - oMinY) });
     }
-    const allPts2D = Array.from(uniqueXY.values());
 
-    const loops: { x: number; y: number }[][] = [];
-    const used = new Set<string>();
-
-    const ptKey = (p: { x: number; y: number }) => `${Math.round(p.x * 100)},${Math.round(p.y * 100)}`;
-
-    const edgeMap = new Map<string, Set<string>>();
-    for (const face of solid3d.faces) {
-      const fv = face.vertices;
-      for (let fi = 0; fi < 3; fi++) {
-        const a = fv[fi];
-        const b2 = fv[(fi + 1) % 3];
-        if (Math.abs(a.z - b2.z) < 0.01) {
-          const ka = ptKey(a);
-          const kb = ptKey(b2);
-          if (!edgeMap.has(ka)) edgeMap.set(ka, new Set());
-          if (!edgeMap.has(kb)) edgeMap.set(kb, new Set());
-          edgeMap.get(ka)!.add(kb);
-          edgeMap.get(kb)!.add(ka);
-        }
+    for (let li = 1; li < loops2D.length; li++) {
+      const holeLoop = loops2D[li];
+      const verts = holeLoop.map(p => ({ x: r3(p.x - oMinX), y: r3(p.y - oMinY) }));
+      let hMinX = Infinity, hMinY = Infinity, hMaxX = -Infinity, hMaxY = -Infinity;
+      for (const v of verts) {
+        hMinX = Math.min(hMinX, v.x); hMinY = Math.min(hMinY, v.y);
+        hMaxX = Math.max(hMaxX, v.x); hMaxY = Math.max(hMaxY, v.y);
       }
-    }
-
-    const sideEdges = new Map<string, Set<string>>();
-    for (const face of solid3d.faces) {
-      const fv = face.vertices;
-      for (let fi = 0; fi < 3; fi++) {
-        const a = fv[fi];
-        const b2 = fv[(fi + 1) % 3];
-        if (Math.abs(a.x - b2.x) < 0.01 && Math.abs(a.y - b2.y) < 0.01 && Math.abs(a.z - b2.z) > 0.01) {
-          const ka = ptKey(a);
-          if (!sideEdges.has(ka)) sideEdges.set(ka, new Set());
-          sideEdges.get(ka)!.add(ptKey(b2));
-        }
-      }
-    }
-
-    const perimPts = allPts2D.filter(p => sideEdges.has(ptKey(p)));
-
-    const perimEdgeMap = new Map<string, Set<string>>();
-    Array.from(edgeMap.entries()).forEach(([ka, neighbors]) => {
-      if (!sideEdges.has(ka)) return;
-      Array.from(neighbors).forEach(kb => {
-        if (!sideEdges.has(kb)) return;
-        if (!perimEdgeMap.has(ka)) perimEdgeMap.set(ka, new Set());
-        if (!perimEdgeMap.has(kb)) perimEdgeMap.set(kb, new Set());
-        perimEdgeMap.get(ka)!.add(kb);
-        perimEdgeMap.get(kb)!.add(ka);
+      openings.push({
+        id: crypto.randomUUID(),
+        x: hMinX, y: hMinY,
+        width: hMaxX - hMinX, height: hMaxY - hMinY,
+        type: "polygon" as const,
+        vertices: verts,
       });
-    });
-
-    const extractLoop = (): { x: number; y: number }[] | null => {
-      let startKey = "";
-      Array.from(perimEdgeMap.entries()).some(([k, nbrs]) => {
-        if (!used.has(k) && nbrs.size > 0) {
-          const hasUnused = Array.from(nbrs).some(n => !used.has(n));
-          if (hasUnused) { startKey = k; return true; }
-        }
-        return false;
-      });
-      if (!startKey) return null;
-
-      const loop: { x: number; y: number }[] = [];
-      const visited = new Set<string>();
-      let current: string = startKey;
-      while (current && !visited.has(current)) {
-        visited.add(current);
-        const pt = allPts2D.find(p => ptKey(p) === current);
-        if (pt) loop.push(pt);
-        const nbrs = perimEdgeMap.get(current);
-        if (!nbrs) break;
-        let next = "";
-        Array.from(nbrs).some(n => {
-          if (!visited.has(n)) { next = n; return true; }
-          return false;
-        });
-        current = next;
-      }
-      if (loop.length >= 3) {
-        for (const p of loop) used.add(ptKey(p));
-        return loop;
-      }
-      return null;
-    };
-
-    while (true) {
-      const loop = extractLoop();
-      if (!loop) break;
-      loops.push(loop);
     }
 
-    if (loops.length > 0) {
-      const calcArea = (pts: { x: number; y: number }[]) =>
-        Math.abs(pts.reduce((s, p, i) => {
-          const np = pts[(i + 1) % pts.length];
-          return s + (p.x * np.y - np.x * p.y);
-        }, 0)) / 2;
+    const pw = r3(Math.max(...outerPts.map(p => p.x)) - oMinX);
+    const ph = r3(Math.max(...outerPts.map(p => p.y)) - oMinY);
+    if (width === 0) width = pw;
+    if (height === 0) height = ph;
 
-      loops.sort((a, b2) => calcArea(b2) - calcArea(a));
-
-      const outerPts = loops[0];
-      const r3 = (n: number) => Math.round(n * 1000) / 1000;
-      const oMinX = Math.min(...outerPts.map(p => p.x));
-      const oMinY = Math.min(...outerPts.map(p => p.y));
-
-      perimeter.length = 0;
-      for (const p of outerPts) {
-        perimeter.push({ id: crypto.randomUUID(), x: r3(p.x - oMinX), y: r3(p.y - oMinY) });
-      }
-
-      for (let li = 1; li < loops.length; li++) {
-        const holeLoop = loops[li];
-        const verts = holeLoop.map(p => ({ x: r3(p.x - oMinX), y: r3(p.y - oMinY) }));
-        let hMinX = Infinity, hMinY = Infinity, hMaxX = -Infinity, hMaxY = -Infinity;
-        for (const v of verts) {
-          hMinX = Math.min(hMinX, v.x); hMinY = Math.min(hMinY, v.y);
-          hMaxX = Math.max(hMaxX, v.x); hMaxY = Math.max(hMaxY, v.y);
-        }
-        openings.push({
-          id: crypto.randomUUID(),
-          x: hMinX, y: hMinY,
-          width: hMaxX - hMinX, height: hMaxY - hMinY,
-          type: "polygon" as const,
-          vertices: verts,
-        });
-      }
-
-      const pw = r3(Math.max(...outerPts.map(p => p.x)) - oMinX);
-      const ph = r3(Math.max(...outerPts.map(p => p.y)) - oMinY);
-      if (width === 0) width = pw;
-      if (height === 0) height = ph;
-
-      console.log(`[DXF] Generated 2D perimeter (${perimeter.length} pts) and ${openings.length} openings from 3D solid`);
-    }
+    console.log(`[DXF] Generated 2D perimeter (${perimeter.length} pts) and ${openings.length} openings from ACIS profile loops`);
   }
 
   return { perimeter, openings, nodes, sketchLines, width, height, solid3d };
