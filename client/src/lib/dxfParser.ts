@@ -162,6 +162,31 @@ function deCasteljau(points: Point2D[], t: number): Point2D {
   return deCasteljau(next, t);
 }
 
+function decodeAcisLine(encoded: string): string {
+  return Array.from(encoded).map(c => {
+    if (c === ' ') return ' ';
+    const code = c.charCodeAt(0);
+    if (code >= 33 && code <= 126) {
+      return String.fromCharCode(159 - code);
+    }
+    return c;
+  }).join('');
+}
+
+function isEncodedAcis(text: string): boolean {
+  const firstLine = text.split('\n')[0] || text.substring(0, 200);
+  const decoded = decodeAcisLine(firstLine);
+  const lower = decoded.toLowerCase();
+  return /^\d+\s+\d+\s+\d+\s+\d+/.test(decoded) ||
+         lower.includes('body') || lower.includes('lump') ||
+         lower.includes('shell') || lower.includes('face') ||
+         lower.includes('edge') || lower.includes('vertex') ||
+         lower.includes('point') || lower.includes('straight') ||
+         lower.includes('plane') || lower.includes('transform') ||
+         lower.includes('spline') || lower.includes('cone') ||
+         lower.includes('sphere') || lower.includes('torus');
+}
+
 function parseAcisSat(satText: string): Parsed3DFace[] {
   const faces: Parsed3DFace[] = [];
 
@@ -170,9 +195,17 @@ function parseAcisSat(satText: string): Parsed3DFace[] {
     console.log("[DXF] 3DSOLID contains binary SAB data, attempting coordinate extraction");
   }
 
+  let textToParse = satText;
+  if (!isBinary && isEncodedAcis(satText)) {
+    console.log("[DXF] Detected encoded ACIS data, decoding with cipher (159 - charCode)");
+    const satLines = satText.split('\n');
+    textToParse = satLines.map(line => decodeAcisLine(line)).join('\n');
+    console.log("[DXF] Decoded first 500 chars:", textToParse.substring(0, 500));
+  }
+
   const records: string[] = [];
   let current = "";
-  for (const ch of satText) {
+  for (const ch of textToParse) {
     if (ch === "#") {
       if (current.trim()) records.push(current.trim());
       current = "";
@@ -922,7 +955,7 @@ function parseDxfEntities(content: string) {
       console.log(`[DXF] ${value}: SAT lines=${satLines.length}, binary chunks=${binaryChunks.length}, handle=${entityHandle}, histRef=${historyHandle}, codes=[${uniqueCodes.join(",")}]`);
 
       if (satLines.length > 0) {
-        const satText = satLines.join("");
+        const satText = satLines.join("\n");
         const satFaces = parseAcisSat(satText);
         console.log(`[DXF] ${value}: parsed ${satFaces.length} faces from SAT text`);
         for (const f of satFaces) {
@@ -956,6 +989,14 @@ function parseDxfEntities(content: string) {
 
   if (solid3dHandles.length > 0 && faces3d.length === 0) {
     console.log(`[DXF] Searching OBJECTS section for ACIS data (handles: ${solid3dHandles.join(",")})`);
+    const acisEntityTypes = new Set([
+      "ACSH_EXTRUSION_CLASS", "ACSH_SWEEP_CLASS", "ACSH_REVOLVE_CLASS",
+      "ACSH_LOFT_CLASS", "ACSH_BOOLEAN_CLASS", "ACSH_FILLET_CLASS",
+      "ACSH_CHAMFER_CLASS", "ACSH_BOX_CLASS", "ACSH_CYLINDER_CLASS",
+      "ACSH_CONE_CLASS", "ACSH_SPHERE_CLASS", "ACSH_TORUS_CLASS",
+      "ACSH_WEDGE_CLASS", "ACSH_PYRAMID_CLASS",
+      "ACSH_HISTORY_CLASS", "ACDB_ACSH_HISTORY_NODE",
+    ]);
     let inObjects = false;
     while (i < lines.length) {
       const oc = next();
@@ -968,48 +1009,35 @@ function parseDxfEntities(content: string) {
       if (!inObjects) continue;
 
       if (oc === "0") {
+        const isAcisEntity = acisEntityTypes.has(ov) || ov.startsWith("ACSH_") || ov.startsWith("ACDB_");
         const objSatLines: string[] = [];
         const objBinaryChunks: string[] = [];
         let objHandle = "";
         let ownerHandle = "";
-        const objGroupCodes: string[] = [];
         while (i < lines.length) {
           if (peek() === "0") break;
           const gc = next();
           const gv = next();
-          objGroupCodes.push(gc);
-          if (gc === "1" || gc === "3") objSatLines.push(gv);
-          if (gc === "310") objBinaryChunks.push(gv);
-          if (gc === "5") objHandle = gv;
-          if (gc === "330") ownerHandle = gv;
+          if (isAcisEntity) {
+            if (gc === "1" || gc === "3") objSatLines.push(gv);
+            if (gc === "310") objBinaryChunks.push(gv);
+            if (gc === "5") objHandle = gv;
+            if (gc === "330") ownerHandle = gv;
+          }
         }
 
-        if (objSatLines.length > 0 || objBinaryChunks.length > 0) {
-          console.log(`[DXF] OBJECTS: found entity type=${ov}, handle=${objHandle}, owner=${ownerHandle}, SAT=${objSatLines.length}, binary=${objBinaryChunks.length}`);
+        if (isAcisEntity && (objSatLines.length > 0 || objBinaryChunks.length > 0)) {
+          console.log(`[DXF] OBJECTS: found ACIS entity type=${ov}, handle=${objHandle}, owner=${ownerHandle}, SAT=${objSatLines.length}, binary=${objBinaryChunks.length}`);
           if (objSatLines.length > 0) {
-            const satText = objSatLines.join("");
+            const satText = objSatLines.join("\n");
             const satFaces = parseAcisSat(satText);
+            console.log(`[DXF] ACIS entity ${ov}: parsed ${satFaces.length} faces`);
             for (const f of satFaces) faces3d.push(f);
           } else if (objBinaryChunks.length > 0) {
             const sabFaces = parseSabBinary(objBinaryChunks);
             for (const f of sabFaces) faces3d.push(f);
           }
         }
-      }
-    }
-
-    if (faces3d.length === 0) {
-      console.log("[DXF] No ACIS data found in OBJECTS section either, doing full file scan for binary data");
-      const fullBinaryChunks: string[] = [];
-      for (let si = 0; si < lines.length - 1; si++) {
-        if (lines[si].trim() === "310") {
-          fullBinaryChunks.push(lines[si + 1].trim());
-        }
-      }
-      if (fullBinaryChunks.length > 0) {
-        console.log(`[DXF] Full scan found ${fullBinaryChunks.length} binary chunks (code 310)`);
-        const sabFaces = parseSabBinary(fullBinaryChunks);
-        for (const f of sabFaces) faces3d.push(f);
       }
     }
   }
