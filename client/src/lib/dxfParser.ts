@@ -1690,10 +1690,158 @@ export function parseDxfFile(content: string): DxfParseResult {
     }
   }
 
-  const width = round3(maxX - minX);
-  const height = round3(maxY - minY);
+  let width = round3(maxX - minX);
+  let height = round3(maxY - minY);
 
   const solid3d = build3DData(faces3d);
+
+  if (perimeter.length < 3 && solid3d && solid3d.faces.length > 0) {
+    const b = solid3d.bounds;
+    const sx = b.min.x;
+    const sy = b.min.y;
+
+    const faceVerts = solid3d.faces.flatMap(f => f.vertices);
+    const uniqueXY = new Map<string, { x: number; y: number }>();
+    for (const v of faceVerts) {
+      const key = `${Math.round(v.x * 100)},${Math.round(v.y * 100)}`;
+      if (!uniqueXY.has(key)) uniqueXY.set(key, { x: v.x, y: v.y });
+    }
+    const allPts2D = Array.from(uniqueXY.values());
+
+    const loops: { x: number; y: number }[][] = [];
+    const used = new Set<string>();
+
+    const ptKey = (p: { x: number; y: number }) => `${Math.round(p.x * 100)},${Math.round(p.y * 100)}`;
+
+    const edgeMap = new Map<string, Set<string>>();
+    for (const face of solid3d.faces) {
+      const fv = face.vertices;
+      for (let fi = 0; fi < 3; fi++) {
+        const a = fv[fi];
+        const b2 = fv[(fi + 1) % 3];
+        if (Math.abs(a.z - b2.z) < 0.01) {
+          const ka = ptKey(a);
+          const kb = ptKey(b2);
+          if (!edgeMap.has(ka)) edgeMap.set(ka, new Set());
+          if (!edgeMap.has(kb)) edgeMap.set(kb, new Set());
+          edgeMap.get(ka)!.add(kb);
+          edgeMap.get(kb)!.add(ka);
+        }
+      }
+    }
+
+    const sideEdges = new Map<string, Set<string>>();
+    for (const face of solid3d.faces) {
+      const fv = face.vertices;
+      for (let fi = 0; fi < 3; fi++) {
+        const a = fv[fi];
+        const b2 = fv[(fi + 1) % 3];
+        if (Math.abs(a.x - b2.x) < 0.01 && Math.abs(a.y - b2.y) < 0.01 && Math.abs(a.z - b2.z) > 0.01) {
+          const ka = ptKey(a);
+          if (!sideEdges.has(ka)) sideEdges.set(ka, new Set());
+          sideEdges.get(ka)!.add(ptKey(b2));
+        }
+      }
+    }
+
+    const perimPts = allPts2D.filter(p => sideEdges.has(ptKey(p)));
+
+    const perimEdgeMap = new Map<string, Set<string>>();
+    Array.from(edgeMap.entries()).forEach(([ka, neighbors]) => {
+      if (!sideEdges.has(ka)) return;
+      Array.from(neighbors).forEach(kb => {
+        if (!sideEdges.has(kb)) return;
+        if (!perimEdgeMap.has(ka)) perimEdgeMap.set(ka, new Set());
+        if (!perimEdgeMap.has(kb)) perimEdgeMap.set(kb, new Set());
+        perimEdgeMap.get(ka)!.add(kb);
+        perimEdgeMap.get(kb)!.add(ka);
+      });
+    });
+
+    const extractLoop = (): { x: number; y: number }[] | null => {
+      let startKey = "";
+      Array.from(perimEdgeMap.entries()).some(([k, nbrs]) => {
+        if (!used.has(k) && nbrs.size > 0) {
+          const hasUnused = Array.from(nbrs).some(n => !used.has(n));
+          if (hasUnused) { startKey = k; return true; }
+        }
+        return false;
+      });
+      if (!startKey) return null;
+
+      const loop: { x: number; y: number }[] = [];
+      const visited = new Set<string>();
+      let current: string = startKey;
+      while (current && !visited.has(current)) {
+        visited.add(current);
+        const pt = allPts2D.find(p => ptKey(p) === current);
+        if (pt) loop.push(pt);
+        const nbrs = perimEdgeMap.get(current);
+        if (!nbrs) break;
+        let next = "";
+        Array.from(nbrs).some(n => {
+          if (!visited.has(n)) { next = n; return true; }
+          return false;
+        });
+        current = next;
+      }
+      if (loop.length >= 3) {
+        for (const p of loop) used.add(ptKey(p));
+        return loop;
+      }
+      return null;
+    };
+
+    while (true) {
+      const loop = extractLoop();
+      if (!loop) break;
+      loops.push(loop);
+    }
+
+    if (loops.length > 0) {
+      const calcArea = (pts: { x: number; y: number }[]) =>
+        Math.abs(pts.reduce((s, p, i) => {
+          const np = pts[(i + 1) % pts.length];
+          return s + (p.x * np.y - np.x * p.y);
+        }, 0)) / 2;
+
+      loops.sort((a, b2) => calcArea(b2) - calcArea(a));
+
+      const outerPts = loops[0];
+      const r3 = (n: number) => Math.round(n * 1000) / 1000;
+      const oMinX = Math.min(...outerPts.map(p => p.x));
+      const oMinY = Math.min(...outerPts.map(p => p.y));
+
+      perimeter.length = 0;
+      for (const p of outerPts) {
+        perimeter.push({ id: crypto.randomUUID(), x: r3(p.x - oMinX), y: r3(p.y - oMinY) });
+      }
+
+      for (let li = 1; li < loops.length; li++) {
+        const holeLoop = loops[li];
+        const verts = holeLoop.map(p => ({ x: r3(p.x - oMinX), y: r3(p.y - oMinY) }));
+        let hMinX = Infinity, hMinY = Infinity, hMaxX = -Infinity, hMaxY = -Infinity;
+        for (const v of verts) {
+          hMinX = Math.min(hMinX, v.x); hMinY = Math.min(hMinY, v.y);
+          hMaxX = Math.max(hMaxX, v.x); hMaxY = Math.max(hMaxY, v.y);
+        }
+        openings.push({
+          id: crypto.randomUUID(),
+          x: hMinX, y: hMinY,
+          width: hMaxX - hMinX, height: hMaxY - hMinY,
+          type: "polygon" as const,
+          vertices: verts,
+        });
+      }
+
+      const pw = r3(Math.max(...outerPts.map(p => p.x)) - oMinX);
+      const ph = r3(Math.max(...outerPts.map(p => p.y)) - oMinY);
+      if (width === 0) width = pw;
+      if (height === 0) height = ph;
+
+      console.log(`[DXF] Generated 2D perimeter (${perimeter.length} pts) and ${openings.length} openings from 3D solid`);
+    }
+  }
 
   return { perimeter, openings, nodes, sketchLines, width, height, solid3d };
 }
