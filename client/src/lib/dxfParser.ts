@@ -275,23 +275,48 @@ function parseAcisSat(satText: string): Parsed3DFace[] {
     return nums;
   };
 
+  const skipEntityHeader = (tokens: string[], typeIdx: number): string[] => {
+    let pos = typeIdx + 1;
+    let headerTokens = 0;
+    while (pos < tokens.length && headerTokens < 3) {
+      pos++;
+      headerTokens++;
+    }
+    return tokens.slice(pos);
+  };
+
+  const getEntityData = (ent: SatEntity): string[] => {
+    const typeIdx = ent.tokens.findIndex(t => t.toLowerCase() === ent.type ||
+      (ent.type.includes("-") && t.toLowerCase() === ent.type));
+    if (typeIdx < 0) return ent.tokens.slice(4);
+    return skipEntityHeader(ent.tokens, typeIdx);
+  };
+
+  const typeCounts: Record<string, number> = {};
+  for (const ent of entities) {
+    typeCounts[ent.type || "unknown"] = (typeCounts[ent.type || "unknown"] || 0) + 1;
+  }
+  console.log("[DXF] ACIS entity type counts:", JSON.stringify(typeCounts));
+
+  for (let ei = 0; ei < Math.min(entities.length, 5); ei++) {
+    console.log(`[DXF] Entity[${ei}]: type=${entities[ei].type}, raw="${entities[ei].raw.substring(0, 120)}"`);
+  }
+
   const vertexPositions = new Map<number, Point3D>();
+
   for (let ei = 0; ei < entities.length; ei++) {
     const ent = entities[ei];
     if (ent.type === "point") {
-      const typeIdx = ent.tokens.findIndex(t => t.toLowerCase() === "point");
-      if (typeIdx >= 0) {
-        const afterType = ent.tokens.slice(typeIdx + 1);
-        const nums: number[] = [];
-        for (const t of afterType) {
-          if (t.startsWith("$") || t.startsWith("@")) continue;
-          const n = parseFloat(t);
-          if (!isNaN(n) && isFinite(n)) nums.push(n);
-          if (nums.length === 3) break;
-        }
-        if (nums.length === 3) {
-          vertexPositions.set(ei, { x: nums[0], y: nums[1], z: nums[2] });
-        }
+      const data = getEntityData(ent);
+      const nums: number[] = [];
+      for (const t of data) {
+        if (t.startsWith("$") || t.startsWith("@")) continue;
+        const n = parseFloat(t);
+        if (!isNaN(n) && isFinite(n)) nums.push(n);
+        if (nums.length === 3) break;
+      }
+      if (nums.length === 3) {
+        vertexPositions.set(ei, { x: nums[0], y: nums[1], z: nums[2] });
       }
     }
   }
@@ -299,27 +324,12 @@ function parseAcisSat(satText: string): Parsed3DFace[] {
   for (let ei = 0; ei < entities.length; ei++) {
     const ent = entities[ei];
     if (ent.type === "vertex") {
-      const refs = ent.tokens.filter(t => t.startsWith("$")).map(t => resolveRef(t));
-      for (const ref of refs) {
+      const data = getEntityData(ent);
+      const allRefs = data.filter(t => t.startsWith("$")).map(t => resolveRef(t));
+      for (const ref of allRefs) {
         if (vertexPositions.has(ref)) {
           vertexPositions.set(ei, vertexPositions.get(ref)!);
           break;
-        }
-      }
-      if (!vertexPositions.has(ei)) {
-        const typeIdx = ent.tokens.findIndex(t => t.toLowerCase() === "vertex");
-        if (typeIdx >= 0) {
-          const afterType = ent.tokens.slice(typeIdx + 1);
-          const nums: number[] = [];
-          for (const t of afterType) {
-            if (t.startsWith("$") || t.startsWith("@")) continue;
-            const n = parseFloat(t);
-            if (!isNaN(n) && isFinite(n)) nums.push(n);
-            if (nums.length === 3) break;
-          }
-          if (nums.length === 3) {
-            vertexPositions.set(ei, { x: nums[0], y: nums[1], z: nums[2] });
-          }
         }
       }
     }
@@ -334,15 +344,22 @@ function parseAcisSat(satText: string): Parsed3DFace[] {
   for (let ei = 0; ei < entities.length; ei++) {
     const ent = entities[ei];
     if (ent.type === "edge") {
-      const refs = ent.tokens.filter(t => t.startsWith("$")).map(t => resolveRef(t));
+      const data = getEntityData(ent);
+      const refs = data.filter(t => t.startsWith("$")).map(t => resolveRef(t));
       const vertexRefs: number[] = [];
       for (const ref of refs) {
-        if (ref >= 0 && ref < entities.length && entities[ref].type === "vertex") {
-          vertexRefs.push(ref);
+        if (ref >= 0 && ref < entities.length) {
+          const refEnt = entities[ref];
+          if (refEnt.type === "vertex" || vertexPositions.has(ref)) {
+            vertexRefs.push(ref);
+          }
         }
       }
       if (vertexRefs.length >= 2) {
         edgeVertices.set(ei, [vertexRefs[0], vertexRefs[1]]);
+      }
+      if (ei < 70) {
+        console.log(`[DXF] Edge[${ei}]: refs=[${refs.join(",")}], vertexRefs=[${vertexRefs.join(",")}], data="${data.join(" ").substring(0, 80)}"`);
       }
     }
   }
@@ -353,10 +370,11 @@ function parseAcisSat(satText: string): Parsed3DFace[] {
   for (let ei = 0; ei < entities.length; ei++) {
     const ent = entities[ei];
     if (ent.type === "coedge") {
-      const refs = ent.tokens.filter(t => t.startsWith("$")).map(t => resolveRef(t));
+      const data = getEntityData(ent);
+      const refs = data.filter(t => t.startsWith("$")).map(t => resolveRef(t));
       for (const ref of refs) {
         if (ref >= 0 && ref < entities.length && entities[ref].type === "edge") {
-          const sense = ent.tokens.includes("forward") ? "forward" : "reversed";
+          const sense = data.includes("forward") ? "forward" : "reversed";
           coedgeEdges.set(ei, { edgeIdx: ref, sense });
           break;
         }
@@ -364,11 +382,14 @@ function parseAcisSat(satText: string): Parsed3DFace[] {
     }
   }
 
+  console.log(`[DXF] Found ${coedgeEdges.size} coedge→edge mappings`);
+
   for (let ei = 0; ei < entities.length; ei++) {
     const ent = entities[ei];
     if (ent.type !== "face") continue;
 
-    const faceRefs = ent.tokens.filter(t => t.startsWith("$")).map(t => resolveRef(t));
+    const data = getEntityData(ent);
+    const faceRefs = data.filter(t => t.startsWith("$")).map(t => resolveRef(t));
     let loopIdx = -1;
     for (const ref of faceRefs) {
       if (ref >= 0 && ref < entities.length && entities[ref].type === "loop") {
@@ -385,7 +406,8 @@ function parseAcisSat(satText: string): Parsed3DFace[] {
       visited.add(currentLoop);
       const loopEnt = getEntity(currentLoop);
       if (!loopEnt || loopEnt.type !== "loop") break;
-      const loopRefs = loopEnt.tokens.filter(t => t.startsWith("$")).map(t => resolveRef(t));
+      const loopData = getEntityData(loopEnt);
+      const loopRefs = loopData.filter(t => t.startsWith("$")).map(t => resolveRef(t));
       let nextLoop = -1;
       for (const ref of loopRefs) {
         if (ref >= 0 && ref < entities.length && entities[ref].type === "loop" && !visited.has(ref)) {
@@ -401,7 +423,8 @@ function parseAcisSat(satText: string): Parsed3DFace[] {
       const loopEnt = getEntity(li);
       if (!loopEnt) continue;
 
-      const loopRefs = loopEnt.tokens.filter(t => t.startsWith("$")).map(t => resolveRef(t));
+      const loopData = getEntityData(loopEnt);
+      const loopRefs = loopData.filter(t => t.startsWith("$")).map(t => resolveRef(t));
       let firstCoedge = -1;
       for (const ref of loopRefs) {
         if (ref >= 0 && ref < entities.length && entities[ref].type === "coedge") {
@@ -424,7 +447,7 @@ function parseAcisSat(satText: string): Parsed3DFace[] {
         if (cedge) {
           const ev = edgeVertices.get(cedge.edgeIdx);
           if (ev) {
-            const [v0, v1] = cedge.sense === "forward" ? ev : [ev[1], ev[0]];
+            const [v0] = cedge.sense === "forward" ? ev : [ev[1], ev[0]];
             const pos = vertexPositions.get(v0);
             if (pos && (loopVertices.length === 0 ||
               Math.abs(pos.x - loopVertices[loopVertices.length - 1].x) > 1e-6 ||
@@ -435,7 +458,8 @@ function parseAcisSat(satText: string): Parsed3DFace[] {
           }
         }
 
-        const coRefs = coedgeEnt.tokens.filter(t => t.startsWith("$")).map(t => resolveRef(t));
+        const coData = getEntityData(coedgeEnt);
+        const coRefs = coData.filter(t => t.startsWith("$")).map(t => resolveRef(t));
         let nextCoedge = -1;
         for (const ref of coRefs) {
           if (ref >= 0 && ref < entities.length && entities[ref].type === "coedge" &&
@@ -448,7 +472,7 @@ function parseAcisSat(satText: string): Parsed3DFace[] {
       }
 
       if (loopVertices.length >= 3) {
-        console.log(`[DXF] Face loop with ${loopVertices.length} vertices`);
+        console.log(`[DXF] Face loop with ${loopVertices.length} vertices: ${loopVertices.map(v => `(${v.x.toFixed(1)},${v.y.toFixed(1)},${v.z.toFixed(1)})`).join(", ")}`);
         for (let vi = 1; vi < loopVertices.length - 1; vi++) {
           faces.push({ vertices: [loopVertices[0], loopVertices[vi], loopVertices[vi + 1]] });
         }
@@ -456,18 +480,145 @@ function parseAcisSat(satText: string): Parsed3DFace[] {
     }
   }
 
-  if (faces.length === 0 && vertexPositions.size >= 4) {
-    console.log("[DXF] Topology traversal produced no faces, falling back to convex hull");
-    const uniquePoints = Array.from(vertexPositions.values());
-    const convexFaces = convexHull3D(uniquePoints);
-    for (const f of convexFaces) faces.push(f);
-  } else if (faces.length === 0 && vertexPositions.size >= 3) {
-    const pts = Array.from(vertexPositions.values());
-    faces.push({ vertices: [pts[0], pts[1], pts[2]] });
+  if (faces.length === 0) {
+    console.log("[DXF] Topology traversal produced no faces");
+    const allPts = Array.from(vertexPositions.values());
+    const uniqueMap = new Map<string, Point3D>();
+    for (const p of allPts) {
+      uniqueMap.set(`${p.x.toFixed(4)},${p.y.toFixed(4)},${p.z.toFixed(4)}`, p);
+    }
+    const uniquePoints = Array.from(uniqueMap.values());
+    console.log(`[DXF] Unique vertex positions: ${uniquePoints.length}`);
+
+    if (uniquePoints.length >= 3) {
+      const allZ = uniquePoints.map(p => p.z);
+      const minZ = Math.min(...allZ);
+      const maxZ = Math.max(...allZ);
+      const isFlat = (maxZ - minZ) < 0.01;
+
+      if (isFlat) {
+        console.log("[DXF] Profile is flat (2D), will build extruded solid");
+        const profilePts = uniquePoints.map(p => ({ x: p.x, y: p.y }));
+        const minX = Math.min(...profilePts.map(p => p.x));
+        const maxX = Math.max(...profilePts.map(p => p.x));
+        const minY = Math.min(...profilePts.map(p => p.y));
+        const maxY = Math.max(...profilePts.map(p => p.y));
+
+        const outerPts = profilePts.filter(p =>
+          Math.abs(p.x - minX) < 0.5 || Math.abs(p.x - maxX) < 0.5 ||
+          Math.abs(p.y - minY) < 0.5 || Math.abs(p.y - maxY) < 0.5
+        );
+
+        const innerPts = profilePts.filter(p =>
+          Math.abs(p.x - minX) > 0.5 && Math.abs(p.x - maxX) > 0.5 &&
+          Math.abs(p.y - minY) > 0.5 && Math.abs(p.y - maxY) > 0.5
+        );
+
+        const thickness = 6;
+        const z0 = minZ;
+        const z1 = z0 + thickness;
+
+        const addQuad = (p0: Point3D, p1: Point3D, p2: Point3D, p3: Point3D) => {
+          faces.push({ vertices: [p0, p1, p2] });
+          faces.push({ vertices: [p0, p2, p3] });
+        };
+
+        const sortedOuter = sortPointsCCW(outerPts);
+        if (sortedOuter.length >= 3) {
+          const topPoly = sortedOuter.map(p => ({ x: p.x, y: p.y, z: z1 }));
+          const botPoly = sortedOuter.map(p => ({ x: p.x, y: p.y, z: z0 }));
+
+          for (let vi = 1; vi < topPoly.length - 1; vi++) {
+            faces.push({ vertices: [topPoly[0], topPoly[vi], topPoly[vi + 1]] });
+          }
+          for (let vi = 1; vi < botPoly.length - 1; vi++) {
+            faces.push({ vertices: [botPoly[0], botPoly[vi + 1], botPoly[vi]] });
+          }
+
+          for (let vi = 0; vi < sortedOuter.length; vi++) {
+            const ni = (vi + 1) % sortedOuter.length;
+            addQuad(
+              { ...topPoly[vi] },
+              { ...topPoly[ni] },
+              { ...botPoly[ni] },
+              { ...botPoly[vi] }
+            );
+          }
+        }
+
+        const openingGroups = groupOpenings(innerPts);
+        for (const opening of openingGroups) {
+          const sorted = sortPointsCCW(opening);
+          if (sorted.length < 3) continue;
+
+          const topO = sorted.map(p => ({ x: p.x, y: p.y, z: z1 }));
+          const botO = sorted.map(p => ({ x: p.x, y: p.y, z: z0 }));
+
+          for (let vi = 0; vi < sorted.length; vi++) {
+            const ni = (vi + 1) % sorted.length;
+            addQuad(
+              { ...topO[ni] },
+              { ...topO[vi] },
+              { ...botO[vi] },
+              { ...botO[ni] }
+            );
+          }
+        }
+
+        console.log(`[DXF] Built extruded solid with ${faces.length} faces`);
+      } else {
+        const convexFaces = convexHull3D(uniquePoints);
+        for (const f of convexFaces) faces.push(f);
+      }
+    }
   }
 
   console.log(`[DXF] parseAcisSat produced ${faces.length} triangle faces`);
   return faces;
+}
+
+function sortPointsCCW(pts: { x: number; y: number }[]): { x: number; y: number }[] {
+  if (pts.length < 3) return [...pts];
+  const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+  const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+  return [...pts].sort((a, b) => {
+    return Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx);
+  });
+}
+
+function groupOpenings(pts: { x: number; y: number }[]): { x: number; y: number }[][] {
+  if (pts.length === 0) return [];
+  const groups: { x: number; y: number }[][] = [];
+  const used = new Set<number>();
+
+  for (let i = 0; i < pts.length; i++) {
+    if (used.has(i)) continue;
+    const group = [pts[i]];
+    used.add(i);
+
+    for (let j = i + 1; j < pts.length; j++) {
+      if (used.has(j)) continue;
+      let closeToGroup = false;
+      for (const gp of group) {
+        const dx = Math.abs(pts[j].x - gp.x);
+        const dy = Math.abs(pts[j].y - gp.y);
+        if (dx < 200 && dy < 200) {
+          closeToGroup = true;
+          break;
+        }
+      }
+      if (closeToGroup) {
+        group.push(pts[j]);
+        used.add(j);
+      }
+    }
+
+    if (group.length >= 3) {
+      groups.push(group);
+    }
+  }
+
+  return groups;
 }
 
 function convexHull3D(points: Point3D[]): Parsed3DFace[] {
