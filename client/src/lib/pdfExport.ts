@@ -188,7 +188,6 @@ function drawIsometric3D(doc: jsPDF, solid3d: Solid3DData, x: number, y: number,
   let projMinX = Infinity, projMinY = Infinity, projMaxX = -Infinity, projMaxY = -Infinity;
   const allPoints: Point3D[] = [];
   solid3d.faces.forEach(f => f.vertices.forEach(v => allPoints.push(v)));
-  solid3d.edges.forEach(e => { allPoints.push(e.start); allPoints.push(e.end); });
 
   for (const p of allPoints) {
     const proj = projectIsometric(p, cx, cy, cz);
@@ -208,61 +207,96 @@ function drawIsometric3D(doc: jsPDF, solid3d: Solid3DData, x: number, y: number,
   const lightLen = Math.sqrt(lightDir.x ** 2 + lightDir.y ** 2 + lightDir.z ** 2);
   lightDir.x /= lightLen; lightDir.y /= lightLen; lightDir.z /= lightLen;
 
-  const isoViewDir = { x: 1, y: 1, z: 1 };
-  const viewLen = Math.sqrt(3);
-
-  const sortedFaces = [...solid3d.faces].sort((a, b) => {
-    const da = a.vertices.reduce((s, v) => s + v.x + v.y + v.z, 0) / a.vertices.length;
-    const db = b.vertices.reduce((s, v) => s + v.x + v.y + v.z, 0) / b.vertices.length;
-    return da - db;
-  });
-
-  const edgeKey = (p1: number[], p2: number[]) => {
-    const k1 = `${Math.round(p1[0] * 10)},${Math.round(p1[1] * 10)}`;
-    const k2 = `${Math.round(p2[0] * 10)},${Math.round(p2[1] * 10)}`;
-    return k1 < k2 ? `${k1}-${k2}` : `${k2}-${k1}`;
+  const ptKey3D = (p: Point3D) => `${p.x.toFixed(3)},${p.y.toFixed(3)},${p.z.toFixed(3)}`;
+  const edgeKey3D = (a: Point3D, b: Point3D) => {
+    const ka = ptKey3D(a), kb = ptKey3D(b);
+    return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
   };
-  const edgeFaceCount = new Map<string, number>();
-  const silhouetteEdges: [number[], number[]][] = [];
 
-  for (const face of sortedFaces) {
+  const edgeFaceNormals = new Map<string, Point3D[]>();
+  for (const face of solid3d.faces) {
     const norm = face3DNormal(face.vertices);
-    const nLen = Math.sqrt(norm.x ** 2 + norm.y ** 2 + norm.z ** 2);
-    if (nLen < 1e-10) continue;
+    const verts = face.vertices;
+    for (let ei = 0; ei < verts.length; ei++) {
+      const ek = edgeKey3D(verts[ei], verts[(ei + 1) % verts.length]);
+      if (!edgeFaceNormals.has(ek)) edgeFaceNormals.set(ek, []);
+      edgeFaceNormals.get(ek)!.push(norm);
+    }
+  }
 
-    const dot = (norm.x * isoViewDir.x + norm.y * isoViewDir.y + norm.z * isoViewDir.z) / (nLen * viewLen);
-    if (dot < -0.01) continue;
-
-    const projected = face.vertices.map(v => {
-      const p = projectIsometric(v, cx, cy, cz);
-      return [ox + p.x * scale, oy + p.y * scale];
-    });
-
-    if (projected.length >= 3) {
-      const ldot = (norm.x * lightDir.x + norm.y * lightDir.y + norm.z * lightDir.z) / nLen;
-      const shade = 0.35 + 0.55 * Math.max(0, Math.min(1, ldot * 0.5 + 0.5));
-      const r = Math.round(190 * shade);
-      const g = Math.round(195 * shade);
-      const b = Math.round(210 * shade);
-      doc.setFillColor(r, g, b);
-      drawPolygon(doc, projected, "F");
-
-      for (let ei = 0; ei < projected.length; ei++) {
-        const ek = edgeKey(projected[ei], projected[(ei + 1) % projected.length]);
-        edgeFaceCount.set(ek, (edgeFaceCount.get(ek) || 0) + 1);
-        if (!edgeFaceCount.has(ek) || edgeFaceCount.get(ek) === 1) {
-          silhouetteEdges.push([projected[ei], projected[(ei + 1) % projected.length]]);
+  const creaseThreshold = Math.cos(30 * Math.PI / 180);
+  const creaseEdges = new Set<string>();
+  for (const [ek, normals] of Array.from(edgeFaceNormals.entries())) {
+    if (normals.length === 1) {
+      creaseEdges.add(ek);
+    } else if (normals.length === 2) {
+      const [n1, n2] = normals;
+      const len1 = Math.sqrt(n1.x ** 2 + n1.y ** 2 + n1.z ** 2);
+      const len2 = Math.sqrt(n2.x ** 2 + n2.y ** 2 + n2.z ** 2);
+      if (len1 > 1e-10 && len2 > 1e-10) {
+        const dot = (n1.x * n2.x + n1.y * n2.y + n1.z * n2.z) / (len1 * len2);
+        if (dot < creaseThreshold) {
+          creaseEdges.add(ek);
         }
       }
     }
   }
 
-  doc.setDrawColor(60, 70, 90);
-  doc.setLineWidth(0.4);
-  for (const edge of solid3d.edges) {
-    const p1 = projectIsometric(edge.start, cx, cy, cz);
-    const p2 = projectIsometric(edge.end, cx, cy, cz);
-    doc.line(ox + p1.x * scale, oy + p1.y * scale, ox + p2.x * scale, oy + p2.y * scale);
+  type ProjectedFace = {
+    projected: number[][];
+    norm: Point3D;
+    depth: number;
+    screenNz: number;
+  };
+  const projectedFaces: ProjectedFace[] = [];
+
+  for (const face of solid3d.faces) {
+    const norm = face3DNormal(face.vertices);
+    const projected = face.vertices.map(v => {
+      const p = projectIsometric(v, cx, cy, cz);
+      return [ox + p.x * scale, oy + p.y * scale];
+    });
+
+    if (projected.length < 3) continue;
+
+    const screenNz = (projected[1][0] - projected[0][0]) * (projected[2][1] - projected[0][1])
+                    - (projected[1][1] - projected[0][1]) * (projected[2][0] - projected[0][0]);
+
+    const depth = face.vertices.reduce((s, v) => s + v.x + v.y + v.z, 0) / face.vertices.length;
+
+    projectedFaces.push({ projected, norm, depth, screenNz });
+  }
+
+  projectedFaces.sort((a, b) => a.depth - b.depth);
+
+  for (const face of projectedFaces) {
+    if (face.screenNz <= 0) continue;
+
+    const nLen = Math.sqrt(face.norm.x ** 2 + face.norm.y ** 2 + face.norm.z ** 2);
+    if (nLen < 1e-10) continue;
+
+    const ldot = (face.norm.x * lightDir.x + face.norm.y * lightDir.y + face.norm.z * lightDir.z) / nLen;
+    const shade = 0.4 + 0.5 * Math.max(0, Math.min(1, ldot * 0.5 + 0.5));
+    const r = Math.round(200 * shade);
+    const g = Math.round(205 * shade);
+    const b = Math.round(215 * shade);
+    doc.setFillColor(r, g, b);
+    drawPolygon(doc, face.projected, "F");
+  }
+
+  doc.setDrawColor(50, 60, 80);
+  doc.setLineWidth(0.5);
+  for (const face of solid3d.faces) {
+    const verts = face.vertices;
+    for (let ei = 0; ei < verts.length; ei++) {
+      const a = verts[ei];
+      const b = verts[(ei + 1) % verts.length];
+      const ek = edgeKey3D(a, b);
+      if (!creaseEdges.has(ek)) continue;
+      const p1 = projectIsometric(a, cx, cy, cz);
+      const p2 = projectIsometric(b, cx, cy, cz);
+      doc.line(ox + p1.x * scale, oy + p1.y * scale, ox + p2.x * scale, oy + p2.y * scale);
+    }
   }
 
   doc.setFontSize(7);
