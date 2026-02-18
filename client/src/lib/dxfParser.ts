@@ -1415,7 +1415,8 @@ function parseDxfEntities(content: string) {
             }
           }
         }
-        extrusionHeight = numericCodes["40"] || numericCodes["41"] || numericCodes["42"] || 0;
+        const dirMag = Math.sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ);
+        extrusionHeight = dirMag > 0.01 ? dirMag : (numericCodes["40"] || numericCodes["41"] || numericCodes["42"] || 0);
 
         if (isAcisEntity && (objSatLines.length > 0 || objBinaryChunks.length > 0)) {
           console.log(`[DXF] OBJECTS: found ACIS entity type=${ov}, handle=${objHandle}, owner=${ownerHandle}, SAT=${objSatLines.length}, binary=${objBinaryChunks.length}, height=${extrusionHeight}, dir=(${dirX},${dirY},${dirZ}), numericCodes=${JSON.stringify(numericCodes)}`);
