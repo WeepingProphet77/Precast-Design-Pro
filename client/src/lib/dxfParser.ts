@@ -218,125 +218,255 @@ function parseAcisSat(satText: string): Parsed3DFace[] {
   console.log(`[DXF] SAT records found: ${records.length}`);
   if (records.length > 0) {
     console.log("[DXF] First SAT record:", records[0].substring(0, 200));
-    if (records.length > 1) console.log("[DXF] Second SAT record:", records[1].substring(0, 200));
   }
 
-  const allExtractedPoints: Point3D[] = [];
+  const headerEnd = records.findIndex(r => r.trim().startsWith("asmheader") || r.trim().startsWith("body"));
+  const entityRecords = headerEnd >= 0 ? records.slice(headerEnd) : records;
 
-  const satEntityTypes = [
-    "point", "vertex", "straight-curve", "straight", "ellipse-curve", "intcurve-curve",
-    "plane-surface", "cone-surface", "sphere-surface", "torus-surface", "spline-surface",
-  ];
+  interface SatEntity {
+    index: number;
+    type: string;
+    tokens: string[];
+    raw: string;
+  }
 
-  const findEntityType = (tokens: string[]): { type: string; idx: number } => {
-    for (let ti = 0; ti < tokens.length; ti++) {
-      const t = tokens[ti].toLowerCase();
-      if (satEntityTypes.includes(t) || t === "body" || t === "lump" || t === "shell" ||
-          t === "face" || t === "loop" || t === "coedge" || t === "edge" || t === "vertex") {
-        return { type: t, idx: ti };
+  const entities: SatEntity[] = [];
+  for (let ri = 0; ri < entityRecords.length; ri++) {
+    const raw = entityRecords[ri].replace(/\n/g, " ").trim();
+    if (!raw) continue;
+    const tokens = raw.split(/\s+/).filter(t => t.length > 0);
+    let entityType = "";
+    for (const t of tokens) {
+      const tl = t.toLowerCase();
+      if (tl === "body" || tl === "lump" || tl === "shell" || tl === "face" ||
+          tl === "loop" || tl === "coedge" || tl === "edge" || tl === "vertex" ||
+          tl === "point" || tl === "asmheader" || tl === "transform" ||
+          tl.endsWith("-surface") || tl.endsWith("-curve") ||
+          tl === "straight" || tl === "ellipse") {
+        entityType = tl;
+        break;
       }
     }
-    for (let ti = 0; ti < tokens.length; ti++) {
-      const t = tokens[ti];
-      if (!t.startsWith("$") && !t.startsWith("-") && !/^[\d.eE+-]+$/.test(t) &&
-          t !== "forward" && t !== "reversed" && t !== "single" && t !== "double" &&
-          t !== "in" && t !== "out" && t !== "T" && t !== "F" && t !== "I") {
-        return { type: t.toLowerCase(), idx: ti };
-      }
+    entities.push({ index: ri, type: entityType, tokens, raw });
+  }
+
+  console.log(`[DXF] Parsed ${entities.length} ACIS entities`);
+
+  const resolveRef = (token: string): number => {
+    if (token.startsWith("$")) {
+      const idx = parseInt(token.substring(1));
+      return isNaN(idx) || idx < 0 ? -1 : idx;
     }
-    return { type: "", idx: 0 };
+    return -1;
   };
 
-  const extractCoordTriplets = (tokens: string[], startIdx: number): Point3D[] => {
-    const pts: Point3D[] = [];
+  const getEntity = (idx: number): SatEntity | null => {
+    if (idx < 0 || idx >= entities.length) return null;
+    return entities[idx];
+  };
+
+  const parseNums = (tokens: string[]): number[] => {
     const nums: number[] = [];
-    for (let ti = startIdx; ti < tokens.length; ti++) {
-      const n = parseFloat(tokens[ti]);
-      if (!isNaN(n) && isFinite(n)) {
-        nums.push(n);
-      }
+    for (const t of tokens) {
+      if (t.startsWith("$") || t.startsWith("@")) continue;
+      const n = parseFloat(t);
+      if (!isNaN(n) && isFinite(n)) nums.push(n);
     }
-    for (let ni = 0; ni + 2 < nums.length; ni += 3) {
-      const x = nums[ni], y = nums[ni + 1], z = nums[ni + 2];
-      if (Math.abs(x) < 1e10 && Math.abs(y) < 1e10 && Math.abs(z) < 1e10) {
-        pts.push({ x, y, z });
-      }
-    }
-    return pts;
+    return nums;
   };
 
-  for (let ri = 0; ri < records.length; ri++) {
-    const rec = records[ri];
-    if (!rec) continue;
-
-    const tokens = rec.split(/\s+/).filter(t => t.length > 0);
-    if (tokens.length < 2) continue;
-
-    const { type: entityType, idx: typeIdx } = findEntityType(tokens);
-
-    if (entityType === "point") {
-      const pts = extractCoordTriplets(tokens, typeIdx + 1);
-      for (const p of pts) allExtractedPoints.push(p);
-    }
-
-    if (entityType === "vertex") {
-      const pts = extractCoordTriplets(tokens, typeIdx + 1);
-      for (const p of pts) allExtractedPoints.push(p);
-    }
-
-    if (entityType === "straight-curve" || entityType === "straight") {
-      const pts = extractCoordTriplets(tokens, typeIdx + 1);
-      if (pts.length > 0) allExtractedPoints.push(pts[0]);
-    }
-
-    if (entityType === "plane-surface") {
-      const pts = extractCoordTriplets(tokens, typeIdx + 1);
-      if (pts.length > 0) allExtractedPoints.push(pts[0]);
-    }
-
-    if (entityType === "cone-surface" || entityType === "sphere-surface" || entityType === "torus-surface") {
-      const pts = extractCoordTriplets(tokens, typeIdx + 1);
-      if (pts.length > 0) allExtractedPoints.push(pts[0]);
-    }
-  }
-
-  if (allExtractedPoints.length === 0) {
-    console.log("[DXF] No point entities found in SAT, trying fallback coordinate extraction");
-    const allNums: number[] = [];
-    const fullText = records.join(" ");
-    const numRegex = /-?\d+\.?\d*(?:[eE][+-]?\d+)?/g;
-    let match;
-    while ((match = numRegex.exec(fullText)) !== null) {
-      const n = parseFloat(match[0]);
-      if (!isNaN(n) && isFinite(n) && Math.abs(n) < 1e10 && Math.abs(n) > 1e-10) {
-        allNums.push(n);
+  const vertexPositions = new Map<number, Point3D>();
+  for (let ei = 0; ei < entities.length; ei++) {
+    const ent = entities[ei];
+    if (ent.type === "point") {
+      const typeIdx = ent.tokens.findIndex(t => t.toLowerCase() === "point");
+      if (typeIdx >= 0) {
+        const afterType = ent.tokens.slice(typeIdx + 1);
+        const nums: number[] = [];
+        for (const t of afterType) {
+          if (t.startsWith("$") || t.startsWith("@")) continue;
+          const n = parseFloat(t);
+          if (!isNaN(n) && isFinite(n)) nums.push(n);
+          if (nums.length === 3) break;
+        }
+        if (nums.length === 3) {
+          vertexPositions.set(ei, { x: nums[0], y: nums[1], z: nums[2] });
+        }
       }
     }
-    for (let ni = 0; ni + 2 < allNums.length; ni += 3) {
-      allExtractedPoints.push({ x: allNums[ni], y: allNums[ni + 1], z: allNums[ni + 2] });
+  }
+
+  for (let ei = 0; ei < entities.length; ei++) {
+    const ent = entities[ei];
+    if (ent.type === "vertex") {
+      const refs = ent.tokens.filter(t => t.startsWith("$")).map(t => resolveRef(t));
+      for (const ref of refs) {
+        if (vertexPositions.has(ref)) {
+          vertexPositions.set(ei, vertexPositions.get(ref)!);
+          break;
+        }
+      }
+      if (!vertexPositions.has(ei)) {
+        const typeIdx = ent.tokens.findIndex(t => t.toLowerCase() === "vertex");
+        if (typeIdx >= 0) {
+          const afterType = ent.tokens.slice(typeIdx + 1);
+          const nums: number[] = [];
+          for (const t of afterType) {
+            if (t.startsWith("$") || t.startsWith("@")) continue;
+            const n = parseFloat(t);
+            if (!isNaN(n) && isFinite(n)) nums.push(n);
+            if (nums.length === 3) break;
+          }
+          if (nums.length === 3) {
+            vertexPositions.set(ei, { x: nums[0], y: nums[1], z: nums[2] });
+          }
+        }
+      }
     }
   }
 
-  console.log(`[DXF] Extracted ${allExtractedPoints.length} coordinate points from ACIS data`);
+  console.log(`[DXF] Found ${vertexPositions.size} vertex/point positions`);
+  vertexPositions.forEach((pos, idx) => {
+    console.log(`[DXF]   vertex[${idx}]: (${pos.x}, ${pos.y}, ${pos.z})`);
+  });
 
-  const vertexBuckets = new Map<string, Point3D>();
-  for (const p of allExtractedPoints) {
-    const key = `${p.x.toFixed(4)},${p.y.toFixed(4)},${p.z.toFixed(4)}`;
-    vertexBuckets.set(key, p);
+  const edgeVertices = new Map<number, [number, number]>();
+  for (let ei = 0; ei < entities.length; ei++) {
+    const ent = entities[ei];
+    if (ent.type === "edge") {
+      const refs = ent.tokens.filter(t => t.startsWith("$")).map(t => resolveRef(t));
+      const vertexRefs: number[] = [];
+      for (const ref of refs) {
+        if (ref >= 0 && ref < entities.length && entities[ref].type === "vertex") {
+          vertexRefs.push(ref);
+        }
+      }
+      if (vertexRefs.length >= 2) {
+        edgeVertices.set(ei, [vertexRefs[0], vertexRefs[1]]);
+      }
+    }
   }
-  const uniquePoints = Array.from(vertexBuckets.values());
 
-  console.log(`[DXF] Unique points after dedup: ${uniquePoints.length}`);
+  console.log(`[DXF] Found ${edgeVertices.size} edges with vertex refs`);
 
-  if (uniquePoints.length >= 4) {
+  const coedgeEdges = new Map<number, { edgeIdx: number; sense: string }>();
+  for (let ei = 0; ei < entities.length; ei++) {
+    const ent = entities[ei];
+    if (ent.type === "coedge") {
+      const refs = ent.tokens.filter(t => t.startsWith("$")).map(t => resolveRef(t));
+      for (const ref of refs) {
+        if (ref >= 0 && ref < entities.length && entities[ref].type === "edge") {
+          const sense = ent.tokens.includes("forward") ? "forward" : "reversed";
+          coedgeEdges.set(ei, { edgeIdx: ref, sense });
+          break;
+        }
+      }
+    }
+  }
+
+  for (let ei = 0; ei < entities.length; ei++) {
+    const ent = entities[ei];
+    if (ent.type !== "face") continue;
+
+    const faceRefs = ent.tokens.filter(t => t.startsWith("$")).map(t => resolveRef(t));
+    let loopIdx = -1;
+    for (const ref of faceRefs) {
+      if (ref >= 0 && ref < entities.length && entities[ref].type === "loop") {
+        loopIdx = ref;
+        break;
+      }
+    }
+    if (loopIdx < 0) continue;
+
+    const allLoops: number[] = [loopIdx];
+    const visited = new Set<number>();
+    let currentLoop = loopIdx;
+    while (currentLoop >= 0 && !visited.has(currentLoop)) {
+      visited.add(currentLoop);
+      const loopEnt = getEntity(currentLoop);
+      if (!loopEnt || loopEnt.type !== "loop") break;
+      const loopRefs = loopEnt.tokens.filter(t => t.startsWith("$")).map(t => resolveRef(t));
+      let nextLoop = -1;
+      for (const ref of loopRefs) {
+        if (ref >= 0 && ref < entities.length && entities[ref].type === "loop" && !visited.has(ref)) {
+          nextLoop = ref;
+          break;
+        }
+      }
+      if (nextLoop >= 0) allLoops.push(nextLoop);
+      currentLoop = nextLoop;
+    }
+
+    for (const li of allLoops) {
+      const loopEnt = getEntity(li);
+      if (!loopEnt) continue;
+
+      const loopRefs = loopEnt.tokens.filter(t => t.startsWith("$")).map(t => resolveRef(t));
+      let firstCoedge = -1;
+      for (const ref of loopRefs) {
+        if (ref >= 0 && ref < entities.length && entities[ref].type === "coedge") {
+          firstCoedge = ref;
+          break;
+        }
+      }
+      if (firstCoedge < 0) continue;
+
+      const loopVertices: Point3D[] = [];
+      const coedgeVisited = new Set<number>();
+      let currentCoedge = firstCoedge;
+
+      while (currentCoedge >= 0 && !coedgeVisited.has(currentCoedge)) {
+        coedgeVisited.add(currentCoedge);
+        const coedgeEnt = getEntity(currentCoedge);
+        if (!coedgeEnt || coedgeEnt.type !== "coedge") break;
+
+        const cedge = coedgeEdges.get(currentCoedge);
+        if (cedge) {
+          const ev = edgeVertices.get(cedge.edgeIdx);
+          if (ev) {
+            const [v0, v1] = cedge.sense === "forward" ? ev : [ev[1], ev[0]];
+            const pos = vertexPositions.get(v0);
+            if (pos && (loopVertices.length === 0 ||
+              Math.abs(pos.x - loopVertices[loopVertices.length - 1].x) > 1e-6 ||
+              Math.abs(pos.y - loopVertices[loopVertices.length - 1].y) > 1e-6 ||
+              Math.abs(pos.z - loopVertices[loopVertices.length - 1].z) > 1e-6)) {
+              loopVertices.push(pos);
+            }
+          }
+        }
+
+        const coRefs = coedgeEnt.tokens.filter(t => t.startsWith("$")).map(t => resolveRef(t));
+        let nextCoedge = -1;
+        for (const ref of coRefs) {
+          if (ref >= 0 && ref < entities.length && entities[ref].type === "coedge" &&
+              !coedgeVisited.has(ref) && ref !== currentCoedge) {
+            nextCoedge = ref;
+            break;
+          }
+        }
+        currentCoedge = nextCoedge;
+      }
+
+      if (loopVertices.length >= 3) {
+        console.log(`[DXF] Face loop with ${loopVertices.length} vertices`);
+        for (let vi = 1; vi < loopVertices.length - 1; vi++) {
+          faces.push({ vertices: [loopVertices[0], loopVertices[vi], loopVertices[vi + 1]] });
+        }
+      }
+    }
+  }
+
+  if (faces.length === 0 && vertexPositions.size >= 4) {
+    console.log("[DXF] Topology traversal produced no faces, falling back to convex hull");
+    const uniquePoints = Array.from(vertexPositions.values());
     const convexFaces = convexHull3D(uniquePoints);
-    for (const f of convexFaces) {
-      faces.push(f);
-    }
-  } else if (uniquePoints.length === 3) {
-    faces.push({ vertices: [uniquePoints[0], uniquePoints[1], uniquePoints[2]] });
+    for (const f of convexFaces) faces.push(f);
+  } else if (faces.length === 0 && vertexPositions.size >= 3) {
+    const pts = Array.from(vertexPositions.values());
+    faces.push({ vertices: [pts[0], pts[1], pts[2]] });
   }
 
+  console.log(`[DXF] parseAcisSat produced ${faces.length} triangle faces`);
   return faces;
 }
 
