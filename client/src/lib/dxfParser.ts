@@ -220,8 +220,22 @@ function parseAcisSat(satText: string): Parsed3DFace[] {
     console.log("[DXF] First SAT record:", records[0].substring(0, 200));
   }
 
-  const headerEnd = records.findIndex(r => r.trim().startsWith("asmheader") || r.trim().startsWith("body"));
-  const entityRecords = headerEnd >= 0 ? records.slice(headerEnd) : records;
+  let entityRecords: string[] = [];
+  for (let ri = 0; ri < records.length; ri++) {
+    const rec = records[ri];
+    const asmIdx = rec.indexOf("asmheader");
+    if (asmIdx >= 0) {
+      entityRecords.push(rec.substring(asmIdx).trim());
+      entityRecords.push(...records.slice(ri + 1));
+      break;
+    }
+    const bodyIdx = rec.indexOf("\nbody ");
+    if (bodyIdx >= 0 || rec.trim().startsWith("body ")) {
+      entityRecords = records.slice(ri);
+      break;
+    }
+  }
+  if (entityRecords.length === 0) entityRecords = records;
 
   interface SatEntity {
     index: number;
