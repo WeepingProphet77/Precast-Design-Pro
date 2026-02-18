@@ -1,5 +1,6 @@
 
 import { Vertex, Opening, Point3D, Face3D, Solid3DData } from "./types";
+import earcut from "earcut";
 
 interface Point2D {
   x: number;
@@ -187,7 +188,7 @@ function isEncodedAcis(text: string): boolean {
          lower.includes('sphere') || lower.includes('torus');
 }
 
-function parseAcisSat(satText: string): Parsed3DFace[] {
+function parseAcisSat(satText: string, extrusionHeight: number = 0): Parsed3DFace[] {
   const faces: Parsed3DFace[] = [];
 
   const isBinary = /^[\da-fA-F\s]+$/.test(satText.substring(0, 100));
@@ -433,6 +434,7 @@ function parseAcisSat(satText: string): Parsed3DFace[] {
       currentLoop = nextLoop;
     }
 
+    const faceLoops: Point3D[][] = [];
     for (const li of allLoops) {
       const loopEnt = getEntity(li);
       if (!loopEnt) continue;
@@ -487,8 +489,91 @@ function parseAcisSat(satText: string): Parsed3DFace[] {
 
       if (loopVertices.length >= 3) {
         console.log(`[DXF] Face loop with ${loopVertices.length} vertices: ${loopVertices.map(v => `(${v.x.toFixed(1)},${v.y.toFixed(1)},${v.z.toFixed(1)})`).join(", ")}`);
-        for (let vi = 1; vi < loopVertices.length - 1; vi++) {
-          faces.push({ vertices: [loopVertices[0], loopVertices[vi], loopVertices[vi + 1]] });
+        faceLoops.push(loopVertices);
+      }
+    }
+
+    const allZ = faceLoops.flat().map(v => v.z);
+    const isFlat = allZ.length > 0 && Math.max(...allZ) - Math.min(...allZ) < 0.01;
+    const height = extrusionHeight > 0 ? extrusionHeight : 6;
+
+    if (isFlat && faceLoops.length > 0) {
+      console.log(`[DXF] Profile is flat (2D), extruding with height=${height}`);
+      const outerLoop = faceLoops.reduce((a, b) => {
+        const areaA = Math.abs(a.reduce((sum, p, i) => {
+          const np = a[(i + 1) % a.length];
+          return sum + (p.x * np.y - np.x * p.y);
+        }, 0)) / 2;
+        const areaB = Math.abs(b.reduce((sum, p, i) => {
+          const np = b[(i + 1) % b.length];
+          return sum + (p.x * np.y - np.x * p.y);
+        }, 0)) / 2;
+        return areaA >= areaB ? a : b;
+      });
+      const openingLoops = faceLoops.filter(l => l !== outerLoop);
+
+      const baseZ = Math.min(...allZ);
+      const topZ = baseZ + height;
+
+      const triangulateFaceWithHoles = (outer: Point3D[], holes: Point3D[][], z: number, flipNormal: boolean) => {
+        const allVerts2D: { x: number; y: number }[] = [];
+        const holeIndices: number[] = [];
+        for (const p of outer) allVerts2D.push({ x: p.x, y: p.y });
+        for (const hole of holes) {
+          holeIndices.push(allVerts2D.length);
+          for (const p of hole) allVerts2D.push({ x: p.x, y: p.y });
+        }
+
+        const flatCoords: number[] = [];
+        for (const v of allVerts2D) {
+          flatCoords.push(v.x, v.y);
+        }
+
+        const triangles = earcut(flatCoords, holeIndices.length > 0 ? holeIndices : undefined);
+        for (let ti = 0; ti < triangles.length; ti += 3) {
+          const i0 = triangles[ti], i1 = triangles[ti + 1], i2 = triangles[ti + 2];
+          const v0: Point3D = { x: allVerts2D[i0].x, y: allVerts2D[i0].y, z };
+          const v1: Point3D = { x: allVerts2D[i1].x, y: allVerts2D[i1].y, z };
+          const v2: Point3D = { x: allVerts2D[i2].x, y: allVerts2D[i2].y, z };
+          if (flipNormal) {
+            faces.push({ vertices: [v0, v2, v1] });
+          } else {
+            faces.push({ vertices: [v0, v1, v2] });
+          }
+        }
+      };
+
+      triangulateFaceWithHoles(outerLoop, openingLoops, baseZ, true);
+      triangulateFaceWithHoles(outerLoop, openingLoops, topZ, false);
+
+      const extrudeLoop = (loop: Point3D[], outward: boolean) => {
+        for (let si = 0; si < loop.length; si++) {
+          const p0 = loop[si];
+          const p1 = loop[(si + 1) % loop.length];
+          const b0: Point3D = { x: p0.x, y: p0.y, z: baseZ };
+          const b1: Point3D = { x: p1.x, y: p1.y, z: baseZ };
+          const t0: Point3D = { x: p0.x, y: p0.y, z: topZ };
+          const t1: Point3D = { x: p1.x, y: p1.y, z: topZ };
+          if (outward) {
+            faces.push({ vertices: [b0, b1, t1] });
+            faces.push({ vertices: [b0, t1, t0] });
+          } else {
+            faces.push({ vertices: [b0, t1, b1] });
+            faces.push({ vertices: [b0, t0, t1] });
+          }
+        }
+      };
+
+      extrudeLoop(outerLoop, true);
+      for (const hole of openingLoops) {
+        extrudeLoop(hole, false);
+      }
+
+      console.log(`[DXF] Extruded solid: ${faces.length} triangle faces (outer + ${openingLoops.length} openings)`);
+    } else {
+      for (const loop of faceLoops) {
+        for (let vi = 1; vi < loop.length - 1; vi++) {
+          faces.push({ vertices: [loop[0], loop[vi], loop[vi + 1]] });
         }
       }
     }
@@ -1309,6 +1394,9 @@ function parseDxfEntities(content: string) {
         const objBinaryChunks: string[] = [];
         let objHandle = "";
         let ownerHandle = "";
+        let extrusionHeight = 0;
+        let dirX = 0, dirY = 0, dirZ = 0;
+        const numericCodes: Record<string, number> = {};
         while (i < lines.length) {
           if (peek() === "0") break;
           const gc = next();
@@ -1318,14 +1406,22 @@ function parseDxfEntities(content: string) {
             if (gc === "310") objBinaryChunks.push(gv);
             if (gc === "5") objHandle = gv;
             if (gc === "330") ownerHandle = gv;
+            if (gc === "10") dirX = parseFloat(gv);
+            if (gc === "20") dirY = parseFloat(gv);
+            if (gc === "30") dirZ = parseFloat(gv);
+            const gcNum = parseInt(gc);
+            if ((gcNum >= 10 && gcNum <= 39) || (gcNum >= 40 && gcNum <= 49) || gcNum === 90 || gcNum === 91) {
+              if (!numericCodes[gc]) numericCodes[gc] = parseFloat(gv);
+            }
           }
         }
+        extrusionHeight = numericCodes["40"] || numericCodes["41"] || numericCodes["42"] || 0;
 
         if (isAcisEntity && (objSatLines.length > 0 || objBinaryChunks.length > 0)) {
-          console.log(`[DXF] OBJECTS: found ACIS entity type=${ov}, handle=${objHandle}, owner=${ownerHandle}, SAT=${objSatLines.length}, binary=${objBinaryChunks.length}`);
+          console.log(`[DXF] OBJECTS: found ACIS entity type=${ov}, handle=${objHandle}, owner=${ownerHandle}, SAT=${objSatLines.length}, binary=${objBinaryChunks.length}, height=${extrusionHeight}, dir=(${dirX},${dirY},${dirZ}), numericCodes=${JSON.stringify(numericCodes)}`);
           if (objSatLines.length > 0) {
             const satText = objSatLines.join("\n");
-            const satFaces = parseAcisSat(satText);
+            const satFaces = parseAcisSat(satText, extrusionHeight);
             console.log(`[DXF] ACIS entity ${ov}: parsed ${satFaces.length} faces`);
             for (const f of satFaces) faces3d.push(f);
           } else if (objBinaryChunks.length > 0) {
