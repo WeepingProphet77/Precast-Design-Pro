@@ -1,7 +1,7 @@
 
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { ProjectData, Panel, ConnectionNode, Solid3DData, Point3D, Face3D } from "./types";
+import { ProjectData, Panel, ConnectionNode } from "./types";
 import { calculateLoadCombinations } from "./calculations";
 
 const MARGIN = 20;
@@ -154,157 +154,109 @@ function drawPolygon(doc: jsPDF, points: number[][], style: "F" | "S" | "FD" = "
   doc.lines(deltas, points[0][0], points[0][1], [1, 1], style, true);
 }
 
-function projectIsometric(p: Point3D, cx: number, cy: number, cz: number): { x: number; y: number; depth: number } {
-  const rx = p.x - cx;
-  const ry = p.y - cy;
-  const rz = p.z - cz;
-  const angle = Math.PI / 6;
-  const px = (rx - rz) * Math.cos(angle);
-  const py = -ry + (rx + rz) * Math.sin(angle);
-  return { x: px, y: py, depth: rx + ry + rz };
-}
-
-function faceNormalZ(verts: Point3D[], cx: number, cy: number, cz: number): number {
-  if (verts.length < 3) return 0;
-  const p0 = projectIsometric(verts[0], cx, cy, cz);
-  const p1 = projectIsometric(verts[1], cx, cy, cz);
-  const p2 = projectIsometric(verts[2], cx, cy, cz);
-  return (p1.x - p0.x) * (p2.y - p0.y) - (p1.y - p0.y) * (p2.x - p0.x);
-}
-
-function face3DNormal(verts: Point3D[]): Point3D {
-  if (verts.length < 3) return { x: 0, y: 0, z: 0 };
-  const ax = verts[1].x - verts[0].x, ay = verts[1].y - verts[0].y, az = verts[1].z - verts[0].z;
-  const bx = verts[2].x - verts[0].x, by = verts[2].y - verts[0].y, bz = verts[2].z - verts[0].z;
-  return { x: ay * bz - az * by, y: az * bx - ax * bz, z: ax * by - ay * bx };
-}
-
-function drawIsometric3D(doc: jsPDF, solid3d: Solid3DData, x: number, y: number, maxW: number, maxH: number) {
-  const { min, max } = solid3d.bounds;
-  const cx = (min.x + max.x) / 2;
-  const cy = (min.y + max.y) / 2;
-  const cz = (min.z + max.z) / 2;
-
-  let projMinX = Infinity, projMinY = Infinity, projMaxX = -Infinity, projMaxY = -Infinity;
-  const allPoints: Point3D[] = [];
-  solid3d.faces.forEach(f => f.vertices.forEach(v => allPoints.push(v)));
-
-  for (const p of allPoints) {
-    const proj = projectIsometric(p, cx, cy, cz);
-    projMinX = Math.min(projMinX, proj.x);
-    projMinY = Math.min(projMinY, proj.y);
-    projMaxX = Math.max(projMaxX, proj.x);
-    projMaxY = Math.max(projMaxY, proj.y);
-  }
-
-  const pw = projMaxX - projMinX || 1;
-  const ph = projMaxY - projMinY || 1;
-  const scale = Math.min((maxW - 30) / pw, (maxH - 30) / ph);
-  const ox = x + (maxW - pw * scale) / 2 - projMinX * scale;
-  const oy = y + (maxH - ph * scale) / 2 - projMinY * scale;
-
-  const lightDir = { x: 0.3, y: -0.8, z: 0.5 };
-  const lightLen = Math.sqrt(lightDir.x ** 2 + lightDir.y ** 2 + lightDir.z ** 2);
-  lightDir.x /= lightLen; lightDir.y /= lightLen; lightDir.z /= lightLen;
-
-  const ptKey3D = (p: Point3D) => `${p.x.toFixed(3)},${p.y.toFixed(3)},${p.z.toFixed(3)}`;
-  const edgeKey3D = (a: Point3D, b: Point3D) => {
-    const ka = ptKey3D(a), kb = ptKey3D(b);
-    return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
-  };
-
-  const edgeFaceNormals = new Map<string, Point3D[]>();
-  for (const face of solid3d.faces) {
-    const norm = face3DNormal(face.vertices);
-    const verts = face.vertices;
-    for (let ei = 0; ei < verts.length; ei++) {
-      const ek = edgeKey3D(verts[ei], verts[(ei + 1) % verts.length]);
-      if (!edgeFaceNormals.has(ek)) edgeFaceNormals.set(ek, []);
-      edgeFaceNormals.get(ek)!.push(norm);
-    }
-  }
-
-  const creaseThreshold = Math.cos(30 * Math.PI / 180);
-  const creaseEdges = new Set<string>();
-  for (const [ek, normals] of Array.from(edgeFaceNormals.entries())) {
-    if (normals.length === 1) {
-      creaseEdges.add(ek);
-    } else if (normals.length === 2) {
-      const [n1, n2] = normals;
-      const len1 = Math.sqrt(n1.x ** 2 + n1.y ** 2 + n1.z ** 2);
-      const len2 = Math.sqrt(n2.x ** 2 + n2.y ** 2 + n2.z ** 2);
-      if (len1 > 1e-10 && len2 > 1e-10) {
-        const dot = (n1.x * n2.x + n1.y * n2.y + n1.z * n2.z) / (len1 * len2);
-        if (dot < creaseThreshold) {
-          creaseEdges.add(ek);
-        }
-      }
-    }
-  }
-
-  type ProjectedFace = {
-    projected: number[][];
-    norm: Point3D;
-    depth: number;
-    screenNz: number;
-  };
-  const projectedFaces: ProjectedFace[] = [];
-
-  for (const face of solid3d.faces) {
-    const norm = face3DNormal(face.vertices);
-    const projected = face.vertices.map(v => {
-      const p = projectIsometric(v, cx, cy, cz);
-      return [ox + p.x * scale, oy + p.y * scale];
-    });
-
-    if (projected.length < 3) continue;
-
-    const screenNz = (projected[1][0] - projected[0][0]) * (projected[2][1] - projected[0][1])
-                    - (projected[1][1] - projected[0][1]) * (projected[2][0] - projected[0][0]);
-
-    const depth = face.vertices.reduce((s, v) => s + v.x + v.y + v.z, 0) / face.vertices.length;
-
-    projectedFaces.push({ projected, norm, depth, screenNz });
-  }
-
-  projectedFaces.sort((a, b) => a.depth - b.depth);
-
-  for (const face of projectedFaces) {
-    if (face.screenNz <= 0) continue;
-
-    const nLen = Math.sqrt(face.norm.x ** 2 + face.norm.y ** 2 + face.norm.z ** 2);
-    if (nLen < 1e-10) continue;
-
-    const ldot = (face.norm.x * lightDir.x + face.norm.y * lightDir.y + face.norm.z * lightDir.z) / nLen;
-    const shade = 0.4 + 0.5 * Math.max(0, Math.min(1, ldot * 0.5 + 0.5));
-    const r = Math.round(200 * shade);
-    const g = Math.round(205 * shade);
-    const b = Math.round(215 * shade);
-    doc.setFillColor(r, g, b);
-    drawPolygon(doc, face.projected, "F");
-  }
-
-  doc.setDrawColor(50, 60, 80);
-  doc.setLineWidth(0.5);
-  for (const face of solid3d.faces) {
-    const verts = face.vertices;
-    for (let ei = 0; ei < verts.length; ei++) {
-      const a = verts[ei];
-      const b = verts[(ei + 1) % verts.length];
-      const ek = edgeKey3D(a, b);
-      if (!creaseEdges.has(ek)) continue;
-      const p1 = projectIsometric(a, cx, cy, cz);
-      const p2 = projectIsometric(b, cx, cy, cz);
-      doc.line(ox + p1.x * scale, oy + p1.y * scale, ox + p2.x * scale, oy + p2.y * scale);
-    }
-  }
-
-  doc.setFontSize(7);
-  doc.setTextColor(...COLORS.muted);
-  doc.text("Isometric View", x + maxW / 2, y + maxH - 4, { align: "center" });
-}
 
 function drawPanelGeometry(doc: jsPDF, panel: Panel, x: number, y: number, maxW: number, maxH: number) {
+  const hasDxfViews = panel.dxfViews && panel.dxfViews.length > 0;
+
+  if (hasDxfViews) {
+    const views = panel.dxfViews!;
+    const allXs = views.flatMap(v => v.polygon.map(p => p.x));
+    const allYs = views.flatMap(v => v.polygon.map(p => p.y));
+    const minX = Math.min(...allXs);
+    const maxXp = Math.max(...allXs);
+    const minY = Math.min(...allYs);
+    const maxYp = Math.max(...allYs);
+    const pw = maxXp - minX || 1;
+    const ph = maxYp - minY || 1;
+    const scale = Math.min((maxW - 20) / pw, (maxH - 20) / ph);
+    const ox = x + (maxW - pw * scale) / 2;
+    const oy = y + (maxH - ph * scale) / 2;
+
+    const fillColors: [number, number, number][] = [
+      [219, 234, 254], [220, 252, 231], [254, 249, 195], [243, 232, 255],
+    ];
+    const strokeColors: [number, number, number][] = [
+      [30, 64, 175], [21, 128, 61], [133, 77, 14], [109, 40, 217],
+    ];
+
+    views.forEach((view, viewIdx) => {
+      const fc = fillColors[viewIdx % fillColors.length];
+      const sc = strokeColors[viewIdx % strokeColors.length];
+      const pts = view.polygon.map(v => [
+        ox + (v.x - minX) * scale,
+        oy + (ph - (v.y - minY)) * scale,
+      ]);
+      if (pts.length > 2) {
+        doc.setFillColor(...fc);
+        doc.setDrawColor(...sc);
+        doc.setLineWidth(0.8);
+        drawPolygon(doc, pts, "FD");
+      }
+      view.openings.forEach(opening => {
+        doc.setFillColor(255, 255, 255);
+        doc.setDrawColor(...sc);
+        doc.setLineWidth(0.5);
+        if (opening.type === "polygon" && opening.vertices) {
+          const verts = opening.vertices.map(v => [
+            ox + (v.x - minX) * scale,
+            oy + (ph - (v.y - minY)) * scale,
+          ]);
+          if (verts.length > 2) drawPolygon(doc, verts, "FD");
+        } else if (opening.type === "rect") {
+          const rx = ox + (opening.x - minX) * scale;
+          const ry = oy + (ph - (opening.y + opening.height - minY)) * scale;
+          doc.rect(rx, ry, opening.width * scale, opening.height * scale, "FD");
+        } else if (opening.type === "circle") {
+          const cx = ox + (opening.x + opening.width / 2 - minX) * scale;
+          const cy = oy + (ph - (opening.y + opening.height / 2 - minY)) * scale;
+          doc.circle(cx, cy, (opening.width / 2) * scale, "FD");
+        }
+      });
+      if (view.showCentroid) {
+        const avgX = view.polygon.reduce((s, v) => s + v.x, 0) / view.polygon.length;
+        const avgY = view.polygon.reduce((s, v) => s + v.y, 0) / view.polygon.length;
+        const cgx = ox + (avgX - minX) * scale;
+        const cgy = oy + (ph - (avgY - minY)) * scale;
+        doc.setDrawColor(...sc);
+        doc.setLineWidth(0.5);
+        doc.line(cgx - 4, cgy, cgx + 4, cgy);
+        doc.line(cgx, cgy - 4, cgx, cgy + 4);
+        doc.circle(cgx, cgy, 3, "S");
+      }
+      doc.setFontSize(6);
+      doc.setTextColor(...sc);
+      const bbox = pts.reduce((b, p) => ({ minX: Math.min(b.minX, p[0]), maxX: Math.max(b.maxX, p[0]), minY: Math.min(b.minY, p[1]), maxY: Math.max(b.maxY, p[1]) }), { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
+      doc.text(view.name, (bbox.minX + bbox.maxX) / 2, bbox.minY - 2, { align: "center" });
+    });
+
+    panel.connections.forEach(conn => {
+      const cx = ox + (conn.x - minX) * scale;
+      const cy = oy + (ph - (conn.y - minY)) * scale;
+      doc.setFillColor(...COLORS.accent);
+      switch (conn.marker) {
+        case "triangle-down": {
+          const s = 4;
+          doc.triangle(cx - s, cy - s, cx + s, cy - s, cx, cy + s, "F");
+          break;
+        }
+        case "square":
+          doc.rect(cx - 3, cy - 3, 6, 6, "F");
+          break;
+        case "diamond": {
+          const s = 4;
+          drawPolygon(doc, [[cx, cy - s], [cx + s, cy], [cx, cy + s], [cx - s, cy]], "F");
+          break;
+        }
+        default:
+          doc.circle(cx, cy, 3, "F");
+      }
+      doc.setFontSize(6);
+      doc.setTextColor(...COLORS.accent);
+      doc.text(conn.label, cx + 5, cy - 2);
+    });
+    return;
+  }
+
   if (panel.perimeter.length < 2) {
     doc.setFontSize(8);
     doc.setTextColor(...COLORS.muted);
@@ -460,29 +412,10 @@ function generatePanelPage(doc: jsPDF, project: ProjectData, panel: Panel) {
 
   y = Math.max(y, y2) + 6;
 
-  const has3D = panel.solid3d && panel.solid3d.faces.length > 0;
-
-  if (has3D && panel.solid3d) {
-    y = drawSectionTitle(doc, "3D ISOMETRIC VIEW", y);
-    y += 4;
-    const isoH = 200;
-    doc.setDrawColor(...COLORS.medGray);
-    doc.setLineWidth(0.3);
-    doc.rect(MARGIN, y, CONTENT_W, isoH);
-    drawIsometric3D(doc, panel.solid3d, MARGIN, y, CONTENT_W, isoH);
-    y += isoH + 10;
-
-    if (y > PAGE_H - 250) {
-      doc.addPage();
-      drawHeader(doc, project);
-      y = 56;
-    }
-  }
-
   y = drawSectionTitle(doc, "PANEL GEOMETRY & CONNECTIONS", y);
   y += 4;
 
-  const geomH = has3D ? 140 : 180;
+  const geomH = 180;
   doc.setDrawColor(...COLORS.medGray);
   doc.setLineWidth(0.3);
   doc.rect(MARGIN, y, CONTENT_W, geomH);

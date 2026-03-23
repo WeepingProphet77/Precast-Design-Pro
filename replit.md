@@ -37,25 +37,16 @@ Preferred communication style: Simple, everyday language.
 - Calculations (LRFD load combinations) performed client-side in `client/src/lib/calculations.ts`
 
 ### Panel Geometry Input
-- **DXF File Import**: Import .DXF files to define panel geometry (supports LWPOLYLINE, POLYLINE, LINE, ARC, CIRCLE, SPLINE, ELLIPSE, POINT, INSERT, 3DFACE, MESH, 3DSOLID, BODY, REGION entities)
-- **3D Solid Support**: 3DFACE, MESH, 3DSOLID, BODY, and POLYFACE MESH entities parsed into triangulated face data with edge extraction
-- **ACIS SAT Parsing**: 3DSOLID/BODY entities contain embedded ACIS SAT geometry data; parser extracts point coordinates and reconstructs faces via convex hull triangulation
-- **POLYFACE Mesh**: POLYLINE entities with flag 64 are parsed as polyface meshes with vertex/face index definitions
+- **DXF File Import**: Import .DXF files to define panel geometry (supports LWPOLYLINE, POLYLINE, LINE, ARC, CIRCLE, SPLINE, ELLIPSE, POINT, INSERT entities)
+- **Multi-View DXF Support**: Multiple closed polylines in a DXF are parsed as separate named orthographic views (Face View, Top View, Side View, Section View, etc.). Top-level polylines by area become views; nested polylines become openings within their containing view.
 - **Rectangle Template**: Quick rectangular panel creation by specifying width and height
-- **Automatic Classification**: Largest closed polyline becomes perimeter; smaller enclosed polylines become openings
+- **Automatic Classification**: Spatial containment analysis — top-level polylines become views, immediately enclosed polylines become openings of their parent view
 - **Coordinate Normalization**: Lower-left corner of imported geometry is set to (0,0)
 - **Imported Nodes**: POINT/INSERT entities from DXF are preserved as snap points for connection placement
 - **Grid Background**: 12" grid displayed behind panel geometry
-- **Datum Marker**: X, Y, Z datum axes shown at panel origin (0,0)
-- **Filled Display**: Panel shape rendered with fill and opening cutouts using even-odd fill rule
-
-### 3D Orbital Viewer
-- **Three.js Rendering**: WebGL-based 3D viewer using Three.js for panels with 3D solid geometry
-- **Orbit Controls**: Mouse drag to orbit, scroll to zoom, right-click to pan around 3D model
-- **2D/3D Toggle**: Toolbar buttons to switch between 2D Konva canvas and 3D orbital viewer
-- **Auto-Detection**: Automatically switches to 3D view when importing DXF files with 3DFACE/MESH entities
-- **Lighting**: Ambient + directional lighting for realistic shading of solid geometry
-- **Edge Display**: Wireframe edges drawn over solid faces for structural clarity
+- **Datum Marker**: X, Y datum axes shown at panel origin (0,0)
+- **Filled Display**: Each view rendered with distinct color fill (blue=Face, green=Top, yellow=Side, purple=Section) and opening cutouts using even-odd fill rule
+- **Per-View Centroid Markers**: Each DXF view can independently show/hide its centroid (CG) crosshair marker; toggle via the DXF Views panel in properties sidebar
 
 ### Connection Placement
 - **Click to Place**: Click on canvas to place connections, with automatic snapping to imported geometry vertices and nodes
@@ -71,8 +62,8 @@ Preferred communication style: Simple, everyday language.
 ### PDF Export
 - **Professional Report**: Multi-page PDF generated via jsPDF with jspdf-autotable
 - **Project Data Sheet**: Cover page with project info, panel index, and ASCE 7-16 design basis
-- **Panel Pages**: One page per panel with properties, geometry drawing (perimeter, openings, connections, centroid), connection forces table, and LRFD load combination results with utilization coloring
-- **Isometric 3D Views**: Panels with 3D solid geometry get an isometric projection drawing in the PDF
+- **Panel Pages**: One page per panel with properties, geometry drawing (all DXF views in color, openings, connections, centroid), connection forces table, and LRFD load combination results with utilization coloring
+- **Multi-View Geometry in PDF**: Each DXF view rendered in its own color in the panel geometry diagram; view name labels and CG markers included where enabled
 - **Master Spreadsheet**: Aggregated governing load cases for all connections across all panels
 - **Capacity Table**: Connection capacity definitions and usage summary
 - **Utilization Coloring**: Green (<90%), amber (90-100%), red (>100%) for utilization ratios
@@ -102,7 +93,6 @@ Preferred communication style: Simple, everyday language.
 
 ### Key Libraries
 - **Konva/react-konva**: 2D canvas rendering for panel designer
-- **Three.js**: WebGL 3D rendering for orbital viewer with OrbitControls
 - **Zod**: Runtime type validation, integrated with forms and Drizzle
 - **date-fns**: Date formatting utilities
 - **class-variance-authority**: Component variant management

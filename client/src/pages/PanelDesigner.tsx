@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Stage, Layer, Rect, Circle, Text, Group, Line, Shape, RegularPolygon } from "react-konva";
 import { useProject } from "@/lib/store";
-import { Panel, ConnectionNode, ConnectionMarker, Vertex, Opening } from "@/lib/types";
+import { Panel, ConnectionNode, ConnectionMarker, Vertex, Opening, DxfView } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,9 +12,8 @@ import { calculateCentroid } from "@/lib/centroid";
 import { parseDxfFile } from "@/lib/dxfParser";
 import {
   Plus, Trash2, ZoomIn, ZoomOut, MousePointer2, Upload, Square as SquareIcon,
-  ArrowUpRight, Crosshair, RotateCcw, Box, Layers
+  ArrowUpRight, Crosshair, RotateCcw
 } from "lucide-react";
-import ThreeViewer from "@/components/ThreeViewer";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -50,8 +49,6 @@ export default function PanelDesigner() {
   const [coordDialogOpen, setCoordDialogOpen] = useState(false);
   const [coordX, setCoordX] = useState(0);
   const [coordY, setCoordY] = useState(0);
-  const [viewMode, setViewMode] = useState<"2d" | "3d">("2d");
-  const [viewerSize, setViewerSize] = useState({ width: 800, height: 600 });
 
   const SNAP_TOLERANCE = 10;
   const GRID_SPACING = 12;
@@ -79,17 +76,30 @@ export default function PanelDesigner() {
   const getSnapPoints = useCallback((): { x: number; y: number }[] => {
     if (!activePanel) return [];
     const pts: { x: number; y: number }[] = [];
-    activePanel.perimeter.forEach(v => pts.push({ x: v.x, y: v.y }));
-    activePanel.openings.forEach(op => {
-      if (op.vertices) {
-        op.vertices.forEach(v => pts.push({ x: v.x, y: v.y }));
-      } else {
-        pts.push({ x: op.x, y: op.y });
-        pts.push({ x: op.x + op.width, y: op.y });
-        pts.push({ x: op.x, y: op.y + op.height });
-        pts.push({ x: op.x + op.width, y: op.y + op.height });
-      }
-    });
+
+    const addOpeningSnaps = (openings: Opening[]) => {
+      openings.forEach(op => {
+        if (op.vertices) {
+          op.vertices.forEach(v => pts.push({ x: v.x, y: v.y }));
+        } else {
+          pts.push({ x: op.x, y: op.y });
+          pts.push({ x: op.x + op.width, y: op.y });
+          pts.push({ x: op.x, y: op.y + op.height });
+          pts.push({ x: op.x + op.width, y: op.y + op.height });
+        }
+      });
+    };
+
+    if (activePanel.dxfViews && activePanel.dxfViews.length > 0) {
+      activePanel.dxfViews.forEach(view => {
+        view.polygon.forEach(v => pts.push({ x: v.x, y: v.y }));
+        addOpeningSnaps(view.openings);
+      });
+    } else {
+      activePanel.perimeter.forEach(v => pts.push({ x: v.x, y: v.y }));
+      addOpeningSnaps(activePanel.openings);
+    }
+
     activePanel.sketchLines?.forEach(l => {
       pts.push({ x: l.x1, y: l.y1 });
       pts.push({ x: l.x2, y: l.y2 });
@@ -136,20 +146,14 @@ export default function PanelDesigner() {
     const text = await file.text();
     try {
       const result = parseDxfFile(text);
-      const has3dData = result.solid3d && result.solid3d.faces.length > 0;
-      if (result.perimeter.length < 3 && !has3dData) {
-        toast({ title: "Import Warning", description: "No valid closed polyline or 3D faces found in the DXF file.", variant: "destructive" });
+      if (result.dxfViews.length === 0) {
+        toast({ title: "Import Warning", description: "No valid closed shapes found in the DXF file.", variant: "destructive" });
         return;
       }
 
       if (activePanel) {
-        let w = result.width;
-        let h = result.height;
-        if (w === 0 && h === 0 && has3dData && result.solid3d) {
-          const b = result.solid3d.bounds;
-          w = Math.round((b.max.x - b.min.x) * 1000) / 1000;
-          h = Math.round((b.max.y - b.min.y) * 1000) / 1000;
-        }
+        const w = result.width;
+        const h = result.height;
         const centroid = result.perimeter.length >= 3
           ? calculateCentroid(result.perimeter, result.openings)
           : { x: w / 2, y: h / 2 };
@@ -159,18 +163,18 @@ export default function PanelDesigner() {
           height: h,
           perimeter: result.perimeter,
           openings: result.openings,
+          dxfViews: result.dxfViews,
           sketchLines: result.sketchLines.map(l => ({ id: crypto.randomUUID(), ...l })),
           importedNodes: result.nodes,
           centroidX: centroid.x,
           centroidY: centroid.y,
-          solid3d: result.solid3d,
         });
-        if (has3dData) {
-          setViewMode("3d");
-          toast({ title: "3D DXF Imported", description: `Imported 3D solid with ${result.solid3d!.faces.length} faces. Switched to 3D view.` });
-        } else {
-          toast({ title: "DXF Imported", description: `Imported panel ${w.toFixed(1)}" × ${h.toFixed(1)}" with ${result.openings.length} opening(s).` });
-        }
+        const viewCount = result.dxfViews.length;
+        const totalOpenings = result.dxfViews.reduce((s, v) => s + v.openings.length, 0);
+        toast({
+          title: "DXF Imported",
+          description: `Imported ${viewCount} view${viewCount > 1 ? "s" : ""} (${w.toFixed(1)}" × ${h.toFixed(1)}")${totalOpenings > 0 ? ` with ${totalOpenings} opening(s)` : ""}.`,
+        });
       }
     } catch (err: any) {
       toast({ title: "Import Error", description: err.message || "Failed to parse DXF file.", variant: "destructive" });
@@ -314,7 +318,8 @@ export default function PanelDesigner() {
     );
   }
 
-  const hasGeometry = activePanel.perimeter.length >= 3;
+  const hasGeometry = activePanel.perimeter.length >= 3 || (activePanel.dxfViews && activePanel.dxfViews.length > 0);
+  const hasDxfViews = !!(activePanel.dxfViews && activePanel.dxfViews.length > 0);
   const canvasW = Math.max(activePanel.width * scale + 160, 800);
   const canvasH = Math.max(activePanel.height * scale + 160, 600);
 
@@ -548,30 +553,10 @@ export default function PanelDesigner() {
 
         <div className="flex-1" />
 
-        {activePanel?.solid3d && activePanel.solid3d.faces.length > 0 && (
-          <>
-            <Separator orientation="vertical" className="h-6" />
-            <div className="flex items-center gap-1 bg-muted rounded-md p-0.5">
-              <Button
-                variant={viewMode === "2d" ? "default" : "ghost"}
-                size="sm"
-                onClick={() => setViewMode("2d")}
-                className="h-8 px-3"
-                data-testid="button-view-2d"
-              >
-                <Layers className="w-4 h-4 mr-1" /> 2D
-              </Button>
-              <Button
-                variant={viewMode === "3d" ? "default" : "ghost"}
-                size="sm"
-                onClick={() => setViewMode("3d")}
-                className="h-8 px-3"
-                data-testid="button-view-3d"
-              >
-                <Box className="w-4 h-4 mr-1" /> 3D
-              </Button>
-            </div>
-          </>
+        {hasDxfViews && (
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/50 rounded px-2 py-1" data-testid="text-view-count">
+            {activePanel.dxfViews!.length} view{activePanel.dxfViews!.length > 1 ? "s" : ""}
+          </div>
         )}
 
         <div className="flex items-center gap-2">
@@ -584,27 +569,6 @@ export default function PanelDesigner() {
 
       <div className="flex-1 flex overflow-hidden">
         <div className="flex-1 flex flex-col min-w-0 bg-slate-100 relative">
-          {viewMode === "3d" && activePanel?.solid3d && activePanel.solid3d.faces.length > 0 ? (
-            <>
-              <div className="absolute top-3 left-3 z-10 bg-background/90 backdrop-blur-sm border rounded-md px-3 py-1.5 shadow-sm text-xs font-mono" data-testid="text-3d-info">
-                3D View — {activePanel.solid3d.faces.length} faces — Drag to orbit, scroll to zoom
-              </div>
-              <div className="flex-1 overflow-hidden" ref={(el) => {
-                if (el) {
-                  const rect = el.getBoundingClientRect();
-                  if (rect.width !== viewerSize.width || rect.height !== viewerSize.height) {
-                    setViewerSize({ width: Math.floor(rect.width), height: Math.floor(rect.height) });
-                  }
-                }
-              }}>
-                <ThreeViewer
-                  solid3d={activePanel.solid3d}
-                  width={viewerSize.width}
-                  height={viewerSize.height}
-                />
-              </div>
-            </>
-          ) : (
           <>
           <div className="absolute top-3 left-3 z-10 bg-background/90 backdrop-blur-sm border rounded-md px-3 py-1.5 shadow-sm text-xs font-mono" data-testid="text-coordinates">
             X: {currentMousePos?.x?.toFixed(1) ?? "—"}" &nbsp; Y: {currentMousePos?.y?.toFixed(1) ?? "—"}"
@@ -650,9 +614,62 @@ export default function PanelDesigner() {
                 <Group x={80} y={40}>
                   {gridLines}
 
-                  {hasGeometry && (
+                  {hasGeometry && hasDxfViews && activePanel.dxfViews!.map((view, viewIdx) => {
+                    const fillColor = viewIdx === 0 ? "#dbeafe" : viewIdx === 1 ? "#dcfce7" : viewIdx === 2 ? "#fef9c3" : "#f3e8ff";
+                    const strokeColor = viewIdx === 0 ? "#1e40af" : viewIdx === 1 ? "#15803d" : viewIdx === 2 ? "#854d0e" : "#6d28d9";
+                    return (
+                      <Shape
+                        key={view.id}
+                        sceneFunc={(context) => {
+                          const ctx = context._context;
+                          ctx.beginPath();
+                          const pVerts = view.polygon;
+                          if (pVerts.length > 0) {
+                            const first = screenFromCad(pVerts[0].x, pVerts[0].y);
+                            ctx.moveTo(first.x, first.y);
+                            for (let i = 1; i < pVerts.length; i++) {
+                              const pt = screenFromCad(pVerts[i].x, pVerts[i].y);
+                              ctx.lineTo(pt.x, pt.y);
+                            }
+                            ctx.closePath();
+                          }
+                          view.openings.forEach(op => {
+                            if (op.type === "polygon" && op.vertices && op.vertices.length >= 3) {
+                              const first = screenFromCad(op.vertices[0].x, op.vertices[0].y);
+                              ctx.moveTo(first.x, first.y);
+                              for (let i = 1; i < op.vertices.length; i++) {
+                                const pt = screenFromCad(op.vertices[i].x, op.vertices[i].y);
+                                ctx.lineTo(pt.x, pt.y);
+                              }
+                              ctx.closePath();
+                            } else if (op.type === "rect") {
+                              const tl = screenFromCad(op.x, op.y + op.height);
+                              ctx.moveTo(tl.x, tl.y);
+                              ctx.lineTo(tl.x + op.width * scale, tl.y);
+                              ctx.lineTo(tl.x + op.width * scale, tl.y + op.height * scale);
+                              ctx.lineTo(tl.x, tl.y + op.height * scale);
+                              ctx.closePath();
+                            } else if (op.type === "circle") {
+                              const center = screenFromCad(op.x + op.width / 2, op.y + op.height / 2);
+                              const radius = (op.width / 2) * scale;
+                              ctx.moveTo(center.x + radius, center.y);
+                              ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+                              ctx.closePath();
+                            }
+                          });
+                          ctx.fillStyle = fillColor;
+                          ctx.fill("evenodd");
+                          ctx.strokeStyle = strokeColor;
+                          ctx.lineWidth = 2;
+                          ctx.stroke();
+                        }}
+                      />
+                    );
+                  })}
+
+                  {hasGeometry && !hasDxfViews && (
                     <Shape
-                      sceneFunc={(context, shape) => {
+                      sceneFunc={(context) => {
                         const ctx = context._context;
                         ctx.beginPath();
                         const pVerts = activePanel.perimeter;
@@ -665,7 +682,6 @@ export default function PanelDesigner() {
                           }
                           ctx.closePath();
                         }
-
                         activePanel.openings.forEach(op => {
                           if (op.type === "polygon" && op.vertices && op.vertices.length >= 3) {
                             const first = screenFromCad(op.vertices[0].x, op.vertices[0].y);
@@ -692,7 +708,6 @@ export default function PanelDesigner() {
                             ctx.closePath();
                           }
                         });
-
                         ctx.fillStyle = "#dbeafe";
                         ctx.fill("evenodd");
                         ctx.strokeStyle = "#1e40af";
@@ -702,7 +717,7 @@ export default function PanelDesigner() {
                     />
                   )}
 
-                  {activePanel.openings.map(op => {
+                  {!hasDxfViews && activePanel.openings.map(op => {
                     if (op.type === "polygon" && op.vertices && op.vertices.length >= 3) {
                       const pts = op.vertices.flatMap(v => {
                         const s = screenFromCad(v.x, v.y);
@@ -717,6 +732,22 @@ export default function PanelDesigner() {
                       return <Circle key={op.id} x={center.x} y={center.y} radius={(op.width / 2) * scale} stroke="#dc2626" strokeWidth={1.5} dash={[4, 4]} />;
                     }
                     return null;
+                  })}
+
+                  {hasDxfViews && activePanel.dxfViews!.map((view, viewIdx) => {
+                    if (!view.showCentroid) return null;
+                    const avgX = view.polygon.reduce((s, v) => s + v.x, 0) / view.polygon.length;
+                    const avgY = view.polygon.reduce((s, v) => s + v.y, 0) / view.polygon.length;
+                    const s = screenFromCad(avgX, avgY);
+                    const color = viewIdx === 0 ? "#7c3aed" : viewIdx === 1 ? "#15803d" : viewIdx === 2 ? "#854d0e" : "#7c3aed";
+                    return (
+                      <Group key={`cg-${view.id}`} x={s.x} y={s.y}>
+                        <Circle radius={8} stroke={color} strokeWidth={1.5} fill="transparent" />
+                        <Line points={[-8, 0, 8, 0]} stroke={color} strokeWidth={1.5} />
+                        <Line points={[0, -8, 0, 8]} stroke={color} strokeWidth={1.5} />
+                        <Text text="CG" x={10} y={-5} fontSize={9} fontStyle="bold" fill={color} />
+                      </Group>
+                    );
                   })}
 
                   {activePanel.sketchLines?.map(l => {
@@ -757,7 +788,7 @@ export default function PanelDesigner() {
                     );
                   })}
 
-                  {centroidPos && hasGeometry && (() => {
+                  {centroidPos && hasGeometry && !hasDxfViews && (() => {
                     const s = screenFromCad(centroidPos.x, centroidPos.y);
                     return (
                       <Group
@@ -837,7 +868,6 @@ export default function PanelDesigner() {
             }
           </div>
           </>
-          )}
         </div>
 
         <div className="w-[340px] border-l bg-card flex flex-col shrink-0 shadow-sm z-10">
@@ -896,6 +926,44 @@ function PanelProperties({ panel }: { panel: Panel }) {
             </div>
           </div>
         </div>
+
+        {panel.dxfViews && panel.dxfViews.length > 0 && (
+          <>
+            <Separator />
+            <div>
+              <h4 className="font-semibold text-xs text-muted-foreground uppercase tracking-wider mb-3">DXF Views</h4>
+              <div className="space-y-2">
+                {panel.dxfViews.map((view, idx) => {
+                  const colorClass = idx === 0 ? "bg-blue-100 border-blue-300 text-blue-800"
+                    : idx === 1 ? "bg-green-100 border-green-300 text-green-800"
+                    : idx === 2 ? "bg-yellow-100 border-yellow-300 text-yellow-800"
+                    : "bg-purple-100 border-purple-300 text-purple-800";
+                  return (
+                    <div key={view.id} className={`flex items-center justify-between rounded px-2 py-1.5 border text-[11px] font-medium ${colorClass}`} data-testid={`view-item-${view.id}`}>
+                      <span>{view.name}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] opacity-70">{view.openings.length} opening{view.openings.length !== 1 ? "s" : ""}</span>
+                        <button
+                          title={view.showCentroid ? "Hide centroid" : "Show centroid"}
+                          className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${view.showCentroid ? "bg-white/70 border-current" : "opacity-50 border-transparent"}`}
+                          onClick={() => {
+                            const updatedViews = panel.dxfViews!.map((v, i) =>
+                              i === idx ? { ...v, showCentroid: !v.showCentroid } : v
+                            );
+                            updatePanel({ ...panel, dxfViews: updatedViews });
+                          }}
+                          data-testid={`button-centroid-toggle-${view.id}`}
+                        >
+                          CG
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        )}
 
         <Separator />
 
