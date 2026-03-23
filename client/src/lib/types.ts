@@ -59,6 +59,14 @@ export interface Opening {
   vertices?: { x: number; y: number }[];
 }
 
+export interface DxfView {
+  id: string;
+  name: string;
+  polygon: Vertex[];
+  openings: Opening[];
+  showCentroid: boolean;
+}
+
 export interface Panel {
   id: string;
   name: string;
@@ -79,7 +87,7 @@ export interface Panel {
   sketchLines: SketchLine[];
   connections: ConnectionNode[];
   importedNodes?: { x: number; y: number }[];
-  solid3d?: Solid3DData;
+  dxfViews?: DxfView[];
 }
 
 export interface SketchLine {
@@ -88,23 +96,6 @@ export interface SketchLine {
   y1: number;
   x2: number;
   y2: number;
-}
-
-export interface Point3D {
-  x: number;
-  y: number;
-  z: number;
-}
-
-export interface Face3D {
-  vertices: [Point3D, Point3D, Point3D] | [Point3D, Point3D, Point3D, Point3D];
-}
-
-export interface Solid3DData {
-  faces: Face3D[];
-  edges: { start: Point3D; end: Point3D }[];
-  bounds: { min: Point3D; max: Point3D };
-  profileLoops?: Point3D[][];
 }
 
 export interface ConnectionCapacity {
