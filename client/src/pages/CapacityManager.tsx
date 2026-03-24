@@ -50,7 +50,7 @@ export default function CapacityManager() {
         <Card>
             <CardHeader className="flex flex-row items-center justify-between">
                 <div>
-                    <CardTitle>Capacity Limits (LRFD)</CardTitle>
+                    <CardTitle>Capacity Limits ({project.info.designMethod === "ASD" ? "ASD" : "LRFD"})</CardTitle>
                     <CardDescription>Enter design capacities in lbs.</CardDescription>
                 </div>
                 <Button onClick={() => {

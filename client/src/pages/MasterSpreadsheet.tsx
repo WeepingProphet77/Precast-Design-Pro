@@ -10,7 +10,7 @@ import { ArrowUpDown, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function MasterSpreadsheet() {
-  const { project } = useProject();
+  const { project, updateProjectInfo } = useProject();
   const [filterPanel, setFilterPanel] = useState<string>("all");
   const [filterType, setFilterType] = useState<string>("all");
 
@@ -18,7 +18,7 @@ export default function MasterSpreadsheet() {
   const allData = project.panels.flatMap(panel => 
     panel.connections.map(conn => {
       const capacity = project.capacities.find(c => c.type === conn.type);
-      const loads = calculateLoadCombinations(conn, capacity);
+      const loads = calculateLoadCombinations(conn, capacity, project.info.designMethod, project.info.designStandard);
       // Find governing case (max utilization, or max force magnitude if no capacity)
       // For simplicity, let's take the one with highest UC, or just the first one if undefined
       const governing = loads.reduce((prev, current) => 
@@ -49,7 +49,13 @@ export default function MasterSpreadsheet() {
        <div className="flex justify-between items-end mb-6">
            <div>
                <h1 className="text-2xl font-bold tracking-tight text-primary">Master Connection Schedule</h1>
-               <p className="text-muted-foreground">Aggregated analysis results for all project connections.</p>
+               <p className="text-muted-foreground">
+                 {project.info.designStandard === "ASCE7-22" ? "ASCE 7-22" : "ASCE 7-16"}
+                 {" "}&middot;{" "}
+                 {project.info.designMethod === "ASD"
+                   ? "Allowable Stress Design (Section 2.4)"
+                   : "Strength Design (Section 2.3)"}
+               </p>
            </div>
            <Button variant="outline">
                <Download className="w-4 h-4 mr-2" /> Export CSV
@@ -73,6 +79,20 @@ export default function MasterSpreadsheet() {
                <SelectContent>
                    <SelectItem value="all">All Types</SelectItem>
                    {project.capacities.map(c => <SelectItem key={c.type} value={c.type}>Type {c.type}</SelectItem>)}
+               </SelectContent>
+           </Select>
+           <Select
+             value={project.info.designMethod}
+             onValueChange={(val) =>
+               updateProjectInfo({ ...project.info, designMethod: val as "LRFD" | "ASD" })
+             }
+           >
+               <SelectTrigger className="w-[280px]">
+                   <SelectValue />
+               </SelectTrigger>
+               <SelectContent>
+                   <SelectItem value="LRFD">Strength Design - Section 2.3</SelectItem>
+                   <SelectItem value="ASD">Allowable Stress Design - Section 2.4</SelectItem>
                </SelectContent>
            </Select>
        </div>

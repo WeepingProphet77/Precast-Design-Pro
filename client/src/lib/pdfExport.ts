@@ -10,8 +10,8 @@ const PAGE_H = 792;
 const CONTENT_W = PAGE_W - 2 * MARGIN;
 
 const COLORS = {
-  primary: [30, 58, 95] as [number, number, number],
-  accent: [0, 100, 180] as [number, number, number],
+  primary: [0, 45, 114] as [number, number, number],    // Wells Blue #002D72
+  accent: [0, 112, 189] as [number, number, number],    // Vibrant Blue #0070BD
   lightGray: [245, 245, 245] as [number, number, number],
   medGray: [200, 200, 200] as [number, number, number],
   text: [40, 40, 40] as [number, number, number],
@@ -27,10 +27,12 @@ function drawHeader(doc: jsPDF, project: ProjectData) {
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(14);
   doc.setFont("helvetica", "bold");
-  doc.text("PrecastPro Designer", MARGIN, 18);
+  doc.text("WELLS Connection Loading", MARGIN, 18);
   doc.setFontSize(8);
   doc.setFont("helvetica", "normal");
-  doc.text("LRFD Analysis Report  |  ASCE 7-16", MARGIN, 30);
+  const stdLabel = project.info.designStandard === "ASCE7-22" ? "ASCE 7-22" : "ASCE 7-16";
+  const methodLabel = project.info.designMethod === "ASD" ? "ASD" : "LRFD";
+  doc.text(`${methodLabel} Analysis Report  |  ${stdLabel}`, MARGIN, 30);
 
   doc.setFontSize(8);
   doc.setFont("helvetica", "normal");
@@ -43,7 +45,7 @@ function drawFooter(doc: jsPDF, pageNum: number, totalPages: number) {
   doc.line(MARGIN, PAGE_H - 30, PAGE_W - MARGIN, PAGE_H - 30);
   doc.setFontSize(7);
   doc.setTextColor(...COLORS.muted);
-  doc.text("PrecastPro Designer  |  Precast Concrete Cladding Connection Analysis", MARGIN, PAGE_H - 20);
+  doc.text("WELLS Connection Loading  |  Precast Concrete Cladding Connection Analysis", MARGIN, PAGE_H - 20);
   doc.text(`Page ${pageNum} of ${totalPages}`, PAGE_W - MARGIN, PAGE_H - 20, { align: "right" });
 }
 
@@ -125,20 +127,37 @@ function generateProjectDataSheet(doc: jsPDF, project: ProjectData) {
   doc.setFontSize(8);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(...COLORS.text);
+  const dbStdLabel = project.info.designStandard === "ASCE7-22" ? "ASCE 7-22" : "ASCE 7-16";
+  const dbSectionRef = project.info.designMethod === "ASD" ? "Section 2.4" : "Section 2.3";
+  const dbMethodName = project.info.designMethod === "ASD"
+    ? "ASD (Allowable Stress Design)"
+    : "LRFD (Load and Resistance Factor Design)";
   const designBasis = [
-    "Design Code: ASCE 7-16 (Minimum Design Loads and Associated Criteria)",
-    "Design Method: LRFD (Load and Resistance Factor Design)",
-    "Reference: PCI Design Handbook, 9th Edition",
+    `Design Standard: ${dbStdLabel} (Minimum Design Loads and Associated Criteria)`,
+    `Design Method: ${dbMethodName}`,
     "",
-    "Load Combinations per ASCE 7-16 Section 2.3.1:",
-    "  1.  1.4D",
-    "  2.  1.2D + 1.6L",
-    "  3.  1.2D + 1.0W + 1.0L",
-    "  4.  0.9D + 1.0W",
-    "  5.  1.2D + 1.0E + 1.0L",
-    "  6.  0.9D + 1.0E",
+    `Load Combinations per ${dbStdLabel} ${dbSectionRef}:`,
   ];
-  designBasis.forEach(line => {
+  const combos = project.info.designMethod === "ASD"
+    ? [
+        "  1.  D",
+        "  2.  D + L",
+        "  3.  D + 0.75L + 0.75(0.6W)",
+        "  4.  D + 0.6W",
+        "  5.  0.6D + 0.6W",
+        "  6.  D + 0.7E",
+        "  7.  D + 0.75L + 0.75(0.7E)",
+        "  8.  0.6D + 0.7E",
+      ]
+    : [
+        "  1.  1.4D",
+        "  2.  1.2D + 1.6L",
+        "  3.  1.2D + 1.0W + 1.0L",
+        "  4.  0.9D + 1.0W",
+        "  5.  1.2D + 1.0E + 1.0L",
+        "  6.  0.9D + 1.0E",
+      ];
+  [...designBasis, ...combos].forEach(line => {
     doc.text(line, MARGIN + 6, y);
     y += 10;
   });
@@ -470,13 +489,13 @@ function generatePanelPage(doc: jsPDF, project: ProjectData, panel: Panel) {
       y = 56;
     }
 
-    y = drawSectionTitle(doc, "LRFD LOAD COMBINATIONS", y);
+    y = drawSectionTitle(doc, `${project.info.designMethod === "ASD" ? "ASD" : "LRFD"} LOAD COMBINATIONS`, y);
     y += 2;
 
     const comboRows: string[][] = [];
     panel.connections.forEach(conn => {
       const capacity = project.capacities.find(c => c.type === conn.type);
-      const combos = calculateLoadCombinations(conn, capacity);
+      const combos = calculateLoadCombinations(conn, capacity, project.info.designMethod, project.info.designStandard);
       combos.forEach(combo => {
         comboRows.push([
           conn.label,
@@ -537,7 +556,7 @@ function generateMasterSpreadsheet(doc: jsPDF, project: ProjectData) {
   const allData = project.panels.flatMap(panel =>
     panel.connections.map(conn => {
       const capacity = project.capacities.find(c => c.type === conn.type);
-      const loads = calculateLoadCombinations(conn, capacity);
+      const loads = calculateLoadCombinations(conn, capacity, project.info.designMethod, project.info.designStandard);
       const governing = loads.reduce((prev, current) =>
         (current.maxUtilization || 0) > (prev.maxUtilization || 0) ? current : prev
       , loads[0]);
@@ -611,7 +630,7 @@ function generateCapacityTable(doc: jsPDF, project: ProjectData) {
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(...COLORS.muted);
-  doc.text("Allowable factored resistance per connection type (LRFD basis)", MARGIN, y + 10);
+  doc.text(`Allowable ${project.info.designMethod === "ASD" ? "service" : "factored"} resistance per connection type (${project.info.designMethod} basis)`, MARGIN, y + 10);
   y += 24;
 
   if (project.capacities.length > 0) {
@@ -677,6 +696,6 @@ export function exportProjectToPDF(project: ProjectData) {
     drawFooter(doc, i, totalPages);
   }
 
-  const filename = `${project.info.jobNumber || "project"}_${project.info.jobName || "report"}_LRFD.pdf`.replace(/\s+/g, "_");
+  const filename = `${project.info.jobNumber || "project"}_${project.info.jobName || "report"}_${project.info.designMethod}.pdf`.replace(/\s+/g, "_");
   doc.save(filename);
 }

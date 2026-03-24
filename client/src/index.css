@@ -11,54 +11,54 @@
   --radius-md: 4px;
   --radius-lg: 6px;
 
-  /* Engineering Palette */
-  --color-background: hsl(210 20% 98%); /* ECF0F1ish - Light Grey */
-  --color-foreground: hsl(210 29% 24%); /* 2C3E50 - Engineering Blue (Dark) */
+  /* WELLS Brand Palette */
+  --color-background: hsl(220 20% 97%);        /* Light gray-blue page background */
+  --color-foreground: hsl(218 100% 22%);        /* Wells Blue for main text */
 
-  --color-card: hsl(0 0% 100%);
-  --color-card-foreground: hsl(210 29% 24%);
+  --color-card: hsl(0 0% 100%);                 /* White */
+  --color-card-foreground: hsl(218 100% 22%);   /* Wells Blue */
 
   --color-popover: hsl(0 0% 100%);
-  --color-popover-foreground: hsl(210 29% 24%);
+  --color-popover-foreground: hsl(218 100% 22%);
 
-  --color-primary: hsl(210 29% 24%); /* #2C3E50 */
+  --color-primary: hsl(218 100% 22%);           /* Wells Blue #002D72 */
   --color-primary-foreground: hsl(0 0% 100%);
 
-  --color-secondary: hsl(210 29% 29%); /* #34495E */
+  --color-secondary: hsl(205 100% 37%);         /* Vibrant Blue #0070BD */
   --color-secondary-foreground: hsl(0 0% 100%);
 
-  --color-muted: hsl(210 10% 90%);
-  --color-muted-foreground: hsl(210 10% 40%);
+  --color-muted: hsl(200 30% 92%);
+  --color-muted-foreground: hsl(218 30% 40%);
 
-  --color-accent: hsl(204 70% 53%); /* #3498DB */
+  --color-accent: hsl(205 100% 37%);            /* Vibrant Blue #0070BD */
   --color-accent-foreground: hsl(0 0% 100%);
 
-  --color-destructive: hsl(6 78% 57%); /* #E74C3C */
+  --color-destructive: hsl(6 78% 57%);          /* Keep existing red */
   --color-destructive-foreground: hsl(0 0% 100%);
 
-  --color-border: hsl(210 10% 85%); /* #BDC3C7ish */
-  --color-input: hsl(210 10% 85%);
-  --color-ring: hsl(204 70% 53%);
+  --color-border: hsl(210 15% 85%);
+  --color-input: hsl(210 15% 85%);
+  --color-ring: hsl(205 100% 37%);              /* Vibrant Blue */
 
   /* Status Colors */
-  --color-success: hsl(145 63% 42%); /* #27AE60 */
-  --color-warning: hsl(37 90% 51%); /* #F39C12 */
-  --color-danger: hsl(6 78% 57%); /* #E74C3C */
-  
-  --color-chart-1: hsl(204 70% 53%);
-  --color-chart-2: hsl(210 29% 24%);
-  --color-chart-3: hsl(145 63% 42%);
-  --color-chart-4: hsl(37 90% 51%);
-  --color-chart-5: hsl(6 78% 57%);
+  --color-success: hsl(66 76% 54%);             /* Vest #D9E021 */
+  --color-warning: hsl(30 97% 50%);             /* Cone #FA8503 */
+  --color-danger: hsl(6 78% 57%);
 
-  --color-sidebar: hsl(210 29% 24%);
-  --color-sidebar-foreground: hsl(210 10% 90%);
-  --color-sidebar-primary: hsl(204 70% 53%);
+  --color-chart-1: hsl(205 100% 37%);           /* Vibrant Blue */
+  --color-chart-2: hsl(218 100% 22%);           /* Wells Blue */
+  --color-chart-3: hsl(66 76% 54%);             /* Vest */
+  --color-chart-4: hsl(30 97% 50%);             /* Cone */
+  --color-chart-5: hsl(43 100% 51%);            /* Lightning */
+
+  --color-sidebar: hsl(218 100% 22%);           /* Wells Blue #002D72 */
+  --color-sidebar-foreground: hsl(0 0% 100%);   /* White text */
+  --color-sidebar-primary: hsl(205 100% 37%);   /* Vibrant Blue for active items */
   --color-sidebar-primary-foreground: hsl(0 0% 100%);
-  --color-sidebar-accent: hsl(210 29% 29%);
+  --color-sidebar-accent: hsl(218 80% 30%);     /* Slightly lighter Wells Blue for hover */
   --color-sidebar-accent-foreground: hsl(0 0% 100%);
-  --color-sidebar-border: hsl(210 29% 29%);
-  --color-sidebar-ring: hsl(204 70% 53%);
+  --color-sidebar-border: hsl(218 80% 30%);
+  --color-sidebar-ring: hsl(205 100% 37%);
 }
 
 @layer base {

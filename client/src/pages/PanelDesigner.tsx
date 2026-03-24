@@ -1186,7 +1186,7 @@ function ConnectionProperties({ panelId, connectionId, onDeselect }: { panelId: 
       <div className="border-b bg-muted/10">
         <TabsList className="w-full justify-start rounded-none h-10 bg-transparent border-none">
           <TabsTrigger value="forces" className="flex-1">Forces</TabsTrigger>
-          <TabsTrigger value="load_combos" className="flex-1">LRFD</TabsTrigger>
+          <TabsTrigger value="load_combos" className="flex-1">{project.info.designMethod === "ASD" ? "ASD" : "LRFD"}</TabsTrigger>
         </TabsList>
       </div>
 
@@ -1230,21 +1230,22 @@ function ConnectionProperties({ panelId, connectionId, onDeselect }: { panelId: 
         <TabsContent value="load_combos" className="p-4 m-0">
           <div className="space-y-3">
             {(() => {
-              const results = calculateLoadCombinations(connection as any);
+              const results = calculateLoadCombinations(connection as any, undefined, project.info.designMethod, project.info.designStandard);
+              const forcePrefix = project.info.designMethod === "ASD" ? "Pa" : "Pu";
               return results.map((result: any, i) => (
                 <div key={i} className="p-3 bg-muted/20 rounded border border-border/50 space-y-2">
                   <div className="text-[10px] font-mono text-muted-foreground truncate">{result.comboName}</div>
                   <div className="grid grid-cols-3 gap-2">
                     <div className="text-center">
-                      <div className="text-[10px] uppercase text-muted-foreground">Pu,x</div>
+                      <div className="text-[10px] uppercase text-muted-foreground">{forcePrefix},x</div>
                       <div className="text-sm font-mono font-bold">{result.fx.toFixed(1)}</div>
                     </div>
                     <div className="text-center border-x">
-                      <div className="text-[10px] uppercase text-muted-foreground">Pu,y</div>
+                      <div className="text-[10px] uppercase text-muted-foreground">{forcePrefix},y</div>
                       <div className="text-sm font-mono font-bold">{result.fy.toFixed(1)}</div>
                     </div>
                     <div className="text-center">
-                      <div className="text-[10px] uppercase text-muted-foreground">Pu,z</div>
+                      <div className="text-[10px] uppercase text-muted-foreground">{forcePrefix},z</div>
                       <div className="text-sm font-mono font-bold">{result.fz.toFixed(1)}</div>
                     </div>
                   </div>

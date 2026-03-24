@@ -9,7 +9,11 @@ function loadCachedProject(): ProjectData | null {
     const cached = localStorage.getItem(CACHE_KEY);
     if (!cached) return null;
     const data = JSON.parse(cached) as ProjectData;
-    if (data.info && data.panels && data.capacities) return data;
+    if (data.info && data.panels && data.capacities) {
+      if (!data.info.designStandard) data.info.designStandard = "ASCE7-16";
+      if (!data.info.designMethod) data.info.designMethod = "LRFD";
+      return data;
+    }
   } catch {
     // Corrupted cache, ignore
   }
@@ -175,7 +179,7 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
           suggestedName: filename,
           types: [
             {
-              description: "PrecastPro Project File",
+              description: "WELLS Connection Loading Project File",
               accept: { "application/json": [".ppd"] },
             },
           ],
@@ -219,6 +223,8 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (!data.info || !data.panels || !data.capacities) {
           throw new Error("Invalid project file format");
         }
+        if (!data.info.designStandard) data.info.designStandard = "ASCE7-16";
+        if (!data.info.designMethod) data.info.designMethod = "LRFD";
         setProject(data);
         saveToBrowserCache(data);
         setIsDirty(false);

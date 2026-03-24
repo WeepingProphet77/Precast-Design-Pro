@@ -4,7 +4,7 @@ import { Link, useLocation } from "wouter";
 import { useProject } from "@/lib/store";
 import { exportProjectToPDF } from "@/lib/pdfExport";
 import { cn } from "@/lib/utils";
-import { LayoutGrid, PenTool, Database, Activity, FileSpreadsheet, Save, FolderOpen, FileText } from "lucide-react";
+import { LayoutGrid, PenTool, Database, FileSpreadsheet, Save, FolderOpen, FileText } from "lucide-react";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
@@ -21,11 +21,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="flex h-screen bg-background overflow-hidden">
       <aside className="w-64 bg-sidebar border-r border-sidebar-border flex flex-col shrink-0">
         <div className="p-6 border-b border-sidebar-border/50">
-          <div className="flex items-center gap-2 mb-1">
-            <Activity className="w-6 h-6 text-sidebar-primary" />
-            <span className="font-bold text-lg text-sidebar-foreground tracking-tight">PrecastPro</span>
+          <div className="flex items-center gap-3 mb-2">
+            <img
+              src={`${import.meta.env.BASE_URL}wells-logo-white.png`}
+              alt="Wells"
+              className="h-8 w-auto"
+            />
           </div>
-          <p className="text-xs text-sidebar-foreground/60">Structural Analysis Suite</p>
+          <p className="text-xs text-sidebar-foreground/70 tracking-wide">Connection Loading</p>
         </div>
 
         <div className="px-4 py-6">
@@ -96,7 +99,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
           <div className="p-4 border-t border-sidebar-border/50">
             <div className="text-xs text-sidebar-foreground/50 text-center">
-              LRFD ASCE 7-16 Compliant
+              {project.info.designStandard === "ASCE7-22" ? "ASCE 7-22" : "ASCE 7-16"}
+              {" "}&middot;{" "}
+              {project.info.designMethod === "ASD" ? "Section 2.4 ASD" : "Section 2.3 LRFD"}
             </div>
           </div>
         </div>
@@ -113,7 +118,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
              {new Date().toLocaleDateString()}
            </div>
         </header>
-        <div className="flex-1 overflow-auto bg-slate-50/50">
+        <div className="flex-1 overflow-auto bg-background">
           {children}
         </div>
       </main>
