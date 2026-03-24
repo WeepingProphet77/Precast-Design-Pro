@@ -111,6 +111,8 @@ export interface ProjectInfo {
   engineer: string;
   location: string;
   date: string;
+  designStandard: "ASCE7-16" | "ASCE7-22";
+  designMethod: "LRFD" | "ASD";
 }
 
 export interface ProjectData {
@@ -126,6 +128,8 @@ export const createDefaultProject = (): ProjectData => ({
     engineer: "",
     location: "",
     date: new Date().toISOString().split("T")[0],
+    designStandard: "ASCE7-16",
+    designMethod: "LRFD",
   },
   panels: [],
   capacities: [

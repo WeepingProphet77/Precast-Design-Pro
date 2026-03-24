@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Separator } from "@/components/ui/separator";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const projectSchema = z.object({
   jobName: z.string().min(1, "Job name is required"),
@@ -16,11 +17,13 @@ const projectSchema = z.object({
   engineer: z.string().min(1, "Engineer name is required"),
   location: z.string().min(1, "Location is required"),
   date: z.string(),
+  designStandard: z.enum(["ASCE7-16", "ASCE7-22"]),
+  designMethod: z.enum(["LRFD", "ASD"]),
 });
 
 export default function ProjectInfo() {
   const { project, updateProjectInfo } = useProject();
-  
+
   const form = useForm({
     resolver: zodResolver(projectSchema),
     defaultValues: project.info,
@@ -113,13 +116,49 @@ export default function ProjectInfo() {
                 />
               </div>
               <Separator />
-              <div className="bg-muted/50 p-4 rounded-md">
-                <h4 className="text-sm font-semibold mb-2">Design Code References</h4>
-                <ul className="text-sm text-muted-foreground list-disc list-inside space-y-1">
-                    <li>ASCE 7-16 Minimum Design Loads</li>
-                    <li>ACI 318-19 Building Code Requirements for Structural Concrete</li>
-                    <li>PCI Design Handbook 9th Edition</li>
-                </ul>
+              <div className="grid grid-cols-2 gap-6">
+                <FormField
+                  control={form.control}
+                  name="designStandard"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Design Standard</FormLabel>
+                      <Select onValueChange={(val) => { field.onChange(val); setTimeout(() => form.handleSubmit(onSubmit)(), 0); }} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="ASCE7-16">ASCE 7-16</SelectItem>
+                          <SelectItem value="ASCE7-22">ASCE 7-22</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="designMethod"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Design Method</FormLabel>
+                      <Select onValueChange={(val) => { field.onChange(val); setTimeout(() => form.handleSubmit(onSubmit)(), 0); }} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="LRFD">Strength Design (Section 2.3)</SelectItem>
+                          <SelectItem value="ASD">Allowable Stress Design (Section 2.4)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
             </form>
           </Form>
