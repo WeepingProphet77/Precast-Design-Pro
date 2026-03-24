@@ -8,7 +8,7 @@ import { LayoutGrid, PenTool, Database, Activity, FileSpreadsheet, Save, FolderO
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
-  const { project, saveProjectToFile, loadProjectFromFile } = useProject();
+  const { project, isDirty, saveProjectToFile, loadProjectFromFile } = useProject();
 
   const navItems = [
     { href: "/", label: "Project Info", icon: LayoutGrid },
@@ -67,6 +67,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             >
               <Save className="w-4 h-4" />
               Save Project
+              {isDirty && (
+                <span
+                  className="ml-auto flex items-center gap-1 text-xs text-amber-500"
+                  title="You have unsaved changes"
+                >
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                  Unsaved
+                </span>
+              )}
             </button>
             <button
               onClick={loadProjectFromFile}
