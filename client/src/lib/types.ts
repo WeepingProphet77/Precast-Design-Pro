@@ -100,6 +100,7 @@ export interface SketchLine {
 
 export interface ConnectionCapacity {
   type: string;
+  name: string;
   capacityX: number;
   capacityY: number;
   capacityZ: number;
@@ -133,7 +134,7 @@ export const createDefaultProject = (): ProjectData => ({
   },
   panels: [],
   capacities: [
-    { type: "A", capacityX: 5000, capacityY: 10000, capacityZ: 5000 },
-    { type: "B", capacityX: 8000, capacityY: 15000, capacityZ: 8000 },
+    { type: "A", name: "Type A", capacityX: 5000, capacityY: 10000, capacityZ: 5000 },
+    { type: "B", name: "Type B", capacityX: 8000, capacityY: 15000, capacityZ: 8000 },
   ],
 });

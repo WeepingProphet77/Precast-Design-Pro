@@ -25,10 +25,12 @@ export default function MasterSpreadsheet() {
         (current.maxUtilization || 0) > (prev.maxUtilization || 0) ? current : prev
       , loads[0]);
 
+      const capName = capacity?.name;
       return {
         panelName: panel.name,
         connLabel: conn.label,
         connType: conn.type,
+        connTypeName: capName || "",
         combo: governing.comboName,
         fx: governing.fx,
         fy: governing.fy,
@@ -78,7 +80,7 @@ export default function MasterSpreadsheet() {
                </SelectTrigger>
                <SelectContent>
                    <SelectItem value="all">All Types</SelectItem>
-                   {project.capacities.map(c => <SelectItem key={c.type} value={c.type}>Type {c.type}</SelectItem>)}
+                   {project.capacities.map(c => <SelectItem key={c.type} value={c.type}>{c.type}{c.name ? ` — ${c.name}` : ""}</SelectItem>)}
                </SelectContent>
            </Select>
            <Select
@@ -125,7 +127,7 @@ export default function MasterSpreadsheet() {
                                <TableCell>{row.connLabel}</TableCell>
                                <TableCell>
                                    <span className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-secondary text-secondary-foreground">
-                                       {row.connType}
+                                       {row.connType}{row.connTypeName ? ` — ${row.connTypeName}` : ""}
                                    </span>
                                </TableCell>
                                <TableCell className="text-xs text-muted-foreground">{row.combo}</TableCell>
