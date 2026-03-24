@@ -1140,9 +1140,11 @@ function ConnectionProperties({ panelId, connectionId, onDeselect }: { panelId: 
               <Select value={connection.type} onValueChange={val => updateConnection(panelId, { ...connection, type: val })}>
                 <SelectTrigger data-testid="select-connection-type"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="A">Type A</SelectItem>
-                  <SelectItem value="B">Type B</SelectItem>
-                  <SelectItem value="C">Type C</SelectItem>
+                  {project.capacities.map(cap => (
+                    <SelectItem key={cap.type} value={cap.type}>
+                      {cap.type}{cap.name ? ` — ${cap.name}` : ""}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

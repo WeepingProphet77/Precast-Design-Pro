@@ -20,11 +20,15 @@ export default function CapacityManager() {
   const handleUpdate = (type: string, field: keyof ConnectionCapacity, value: string) => {
     const capacity = project.capacities.find(c => c.type === type);
     if (!capacity) return;
-    
-    updateCapacity({
-        ...capacity,
-        [field]: Number(value)
-    });
+
+    if (field === "name") {
+      updateCapacity({ ...capacity, name: value });
+    } else if (field === "type") {
+      // Type is the identifier — treat as string (preserve leading zeros, etc.)
+      updateCapacity({ ...capacity, type: value });
+    } else {
+      updateCapacity({ ...capacity, [field]: Number(value) });
+    }
   };
 
   const handleDelete = (type: string) => {
@@ -40,6 +44,18 @@ export default function CapacityManager() {
     }
   };
 
+  const getNextTypeId = (): string => {
+    const existingTypes = project.capacities.map(c => c.type);
+    // Try single letters first
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const nextLetter = alphabet.split("").find(char => !existingTypes.includes(char));
+    if (nextLetter) return nextLetter;
+    // Fallback to numbers
+    let i = 1;
+    while (existingTypes.includes(String(i))) i++;
+    return String(i);
+  };
+
   return (
     <div className="p-8 max-w-5xl mx-auto">
         <div className="mb-8">
@@ -51,15 +67,13 @@ export default function CapacityManager() {
             <CardHeader className="flex flex-row items-center justify-between">
                 <div>
                     <CardTitle>Capacity Limits ({project.info.designMethod === "ASD" ? "ASD" : "LRFD"})</CardTitle>
-                    <CardDescription>Enter design capacities in lbs.</CardDescription>
+                    <CardDescription>Enter design capacities in lbs. Type IDs can be letters, numbers, or codes (e.g. 01, A1, 001).</CardDescription>
                 </div>
                 <Button onClick={() => {
-                    const existingTypes = project.capacities.map(c => c.type);
-                    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-                    const nextType = alphabet.split("").find(char => !existingTypes.includes(char)) || "Z";
-                    
+                    const nextType = getNextTypeId();
                     addCapacity({
                         type: nextType,
+                        name: "",
                         capacityX: 5000,
                         capacityY: 5000,
                         capacityZ: 5000
@@ -72,7 +86,8 @@ export default function CapacityManager() {
                 <Table>
                     <TableHeader>
                         <TableRow>
-                            <TableHead className="w-[100px]">Type</TableHead>
+                            <TableHead className="w-[100px]">Type ID</TableHead>
+                            <TableHead className="w-[180px]">Name</TableHead>
                             <TableHead>X-Capacity (Shear/Normal)</TableHead>
                             <TableHead>Y-Capacity (Gravity)</TableHead>
                             <TableHead>Z-Capacity (Tie-back)</TableHead>
@@ -82,29 +97,47 @@ export default function CapacityManager() {
                     <TableBody>
                         {project.capacities.map((cap) => (
                             <TableRow key={cap.type} data-testid={`row-capacity-${cap.type}`}>
-                                <TableCell className="font-bold text-lg">{cap.type}</TableCell>
                                 <TableCell>
-                                    <Input 
-                                        type="number" 
-                                        value={cap.capacityX} 
+                                    <Input
+                                        type="text"
+                                        value={cap.type}
+                                        onChange={(e) => handleUpdate(cap.type, 'type', e.target.value)}
+                                        className="font-bold text-lg max-w-[80px] font-mono"
+                                        data-testid={`input-capacity-type-${cap.type}`}
+                                    />
+                                </TableCell>
+                                <TableCell>
+                                    <Input
+                                        type="text"
+                                        value={cap.name}
+                                        onChange={(e) => handleUpdate(cap.type, 'name', e.target.value)}
+                                        placeholder="Optional name..."
+                                        className="max-w-[170px]"
+                                        data-testid={`input-capacity-name-${cap.type}`}
+                                    />
+                                </TableCell>
+                                <TableCell>
+                                    <Input
+                                        type="number"
+                                        value={cap.capacityX}
                                         onChange={(e) => handleUpdate(cap.type, 'capacityX', e.target.value)}
                                         className="font-mono max-w-[150px]"
                                         data-testid={`input-capacity-x-${cap.type}`}
                                     />
                                 </TableCell>
                                 <TableCell>
-                                    <Input 
-                                        type="number" 
-                                        value={cap.capacityY} 
+                                    <Input
+                                        type="number"
+                                        value={cap.capacityY}
                                         onChange={(e) => handleUpdate(cap.type, 'capacityY', e.target.value)}
                                         className="font-mono max-w-[150px]"
                                         data-testid={`input-capacity-y-${cap.type}`}
                                     />
                                 </TableCell>
                                 <TableCell>
-                                    <Input 
-                                        type="number" 
-                                        value={cap.capacityZ} 
+                                    <Input
+                                        type="number"
+                                        value={cap.capacityZ}
                                         onChange={(e) => handleUpdate(cap.type, 'capacityZ', e.target.value)}
                                         className="font-mono max-w-[150px]"
                                         data-testid={`input-capacity-z-${cap.type}`}

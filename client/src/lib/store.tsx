@@ -3,6 +3,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { ProjectData, createDefaultProject, Panel, ConnectionNode, ProjectInfo, ConnectionCapacity } from "./types";
 
 const CACHE_KEY = "precastpro_project_cache";
+const FILENAME_KEY = "precastpro_current_filename";
 
 function loadCachedProject(): ProjectData | null {
   try {
@@ -12,6 +13,11 @@ function loadCachedProject(): ProjectData | null {
     if (data.info && data.panels && data.capacities) {
       if (!data.info.designStandard) data.info.designStandard = "ASCE7-16";
       if (!data.info.designMethod) data.info.designMethod = "LRFD";
+      // Ensure backward compat: add name field if missing
+      data.capacities = data.capacities.map(c => ({
+        ...c,
+        name: c.name || c.type,
+      }));
       return data;
     }
   } catch {
@@ -28,9 +34,30 @@ function saveToBrowserCache(project: ProjectData) {
   }
 }
 
+function loadCachedFileName(): string | null {
+  try {
+    return localStorage.getItem(FILENAME_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function saveCachedFileName(name: string | null) {
+  try {
+    if (name) {
+      localStorage.setItem(FILENAME_KEY, name);
+    } else {
+      localStorage.removeItem(FILENAME_KEY);
+    }
+  } catch {
+    // ignore
+  }
+}
+
 interface ProjectContextType {
   project: ProjectData;
   isDirty: boolean;
+  currentFileName: string | null;
   updateProjectInfo: (info: ProjectInfo) => void;
   setProjectData: (data: ProjectData) => void;
   updatePanel: (panel: Panel) => void;
@@ -43,6 +70,8 @@ interface ProjectContextType {
   addCapacity: (capacity: ConnectionCapacity) => void;
   deleteCapacity: (type: string) => void;
   saveProjectToFile: () => void;
+  saveProjectAs: () => void;
+  newProject: () => void;
   loadProjectFromFile: () => void;
 }
 
@@ -53,6 +82,7 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return loadCachedProject() || createDefaultProject();
   });
   const [isDirty, setIsDirty] = useState(false);
+  const [currentFileName, setCurrentFileName] = useState<string | null>(() => loadCachedFileName());
   const fileHandleRef = useRef<FileSystemFileHandle | null>(null);
   const isInitialLoad = useRef(true);
 
@@ -168,11 +198,11 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }));
   };
 
-  const saveProjectToFile = useCallback(async () => {
+  // Save with dialog (used for Save As, or first-time Save)
+  const saveWithDialog = useCallback(async () => {
     const json = JSON.stringify(project, null, 2);
     const filename = `${project.info.jobNumber || "project"}_${project.info.jobName || "untitled"}.ppd`.replace(/\s+/g, "_");
 
-    // Try the File System Access API (save dialog with location picker)
     if ("showSaveFilePicker" in window) {
       try {
         const handle = await (window as any).showSaveFilePicker({
@@ -188,16 +218,17 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
         await writable.write(json);
         await writable.close();
         fileHandleRef.current = handle;
+        const savedName = handle.name || filename;
+        setCurrentFileName(savedName);
+        saveCachedFileName(savedName);
         setIsDirty(false);
         return;
       } catch (err: any) {
-        // User cancelled the dialog — do nothing
         if (err.name === "AbortError") return;
-        // Fall through to legacy download on other errors
       }
     }
 
-    // Fallback: legacy download for browsers without File System Access API
+    // Fallback: legacy download
     const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -207,8 +238,46 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    setCurrentFileName(filename);
+    saveCachedFileName(filename);
     setIsDirty(false);
   }, [project]);
+
+  // Save: if we already have a file handle, write directly without dialog
+  const saveProjectToFile = useCallback(async () => {
+    if (fileHandleRef.current) {
+      try {
+        const json = JSON.stringify(project, null, 2);
+        const writable = await fileHandleRef.current.createWritable();
+        await writable.write(json);
+        await writable.close();
+        setIsDirty(false);
+        return;
+      } catch (err: any) {
+        // If permission denied or handle stale, fall through to dialog
+        fileHandleRef.current = null;
+      }
+    }
+    // No existing handle — show dialog
+    await saveWithDialog();
+  }, [project, saveWithDialog]);
+
+  // Save As: always show the dialog
+  const saveProjectAs = useCallback(async () => {
+    await saveWithDialog();
+  }, [saveWithDialog]);
+
+  // New Project: clear cache and reset
+  const newProject = useCallback(() => {
+    const defaultData = createDefaultProject();
+    setProject(defaultData);
+    saveToBrowserCache(defaultData);
+    fileHandleRef.current = null;
+    setCurrentFileName(null);
+    saveCachedFileName(null);
+    setIsDirty(false);
+    isInitialLoad.current = true;
+  }, []);
 
   const loadProjectFromFile = useCallback(() => {
     const input = document.createElement("input");
@@ -225,8 +294,16 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
         if (!data.info.designStandard) data.info.designStandard = "ASCE7-16";
         if (!data.info.designMethod) data.info.designMethod = "LRFD";
+        // Ensure backward compat: add name field if missing
+        data.capacities = data.capacities.map(c => ({
+          ...c,
+          name: c.name || c.type,
+        }));
         setProject(data);
         saveToBrowserCache(data);
+        const openedName = file.name;
+        setCurrentFileName(openedName);
+        saveCachedFileName(openedName);
         setIsDirty(false);
         fileHandleRef.current = null;
       } catch (err: any) {
@@ -241,6 +318,7 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
       value={{
         project,
         isDirty,
+        currentFileName,
         updateProjectInfo,
         setProjectData,
         updatePanel,
@@ -253,6 +331,8 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
         addCapacity,
         deleteCapacity,
         saveProjectToFile,
+        saveProjectAs,
+        newProject,
         loadProjectFromFile,
       }}
     >

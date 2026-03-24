@@ -4,11 +4,11 @@ import { Link, useLocation } from "wouter";
 import { useProject } from "@/lib/store";
 import { exportProjectToPDF } from "@/lib/pdfExport";
 import { cn } from "@/lib/utils";
-import { LayoutGrid, PenTool, Database, FileSpreadsheet, Save, FolderOpen, FileText } from "lucide-react";
+import { LayoutGrid, PenTool, Database, FileSpreadsheet, Save, SaveAll, FolderOpen, FileText, FilePlus } from "lucide-react";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
-  const { project, isDirty, saveProjectToFile, loadProjectFromFile } = useProject();
+  const { project, isDirty, currentFileName, saveProjectToFile, saveProjectAs, newProject, loadProjectFromFile } = useProject();
 
   const navItems = [
     { href: "/", label: "Project Info", icon: LayoutGrid },
@@ -64,6 +64,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               File
             </div>
             <button
+              onClick={newProject}
+              className="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer w-full text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              data-testid="button-new-project"
+            >
+              <FilePlus className="w-4 h-4" />
+              New Project
+            </button>
+            <button
               onClick={saveProjectToFile}
               className="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer w-full text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
               data-testid="button-save-project"
@@ -79,6 +87,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   Unsaved
                 </span>
               )}
+            </button>
+            {currentFileName && (
+              <div className="px-3 pb-1">
+                <span
+                  className="text-[10px] text-sidebar-foreground/50 font-mono truncate block"
+                  title={currentFileName}
+                >
+                  {currentFileName}
+                </span>
+              </div>
+            )}
+            <button
+              onClick={saveProjectAs}
+              className="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer w-full text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              data-testid="button-save-as"
+            >
+              <SaveAll className="w-4 h-4" />
+              Save As...
             </button>
             <button
               onClick={loadProjectFromFile}
@@ -110,7 +136,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <main className="flex-1 flex flex-col overflow-hidden">
         <header className="h-14 bg-card border-b flex items-center px-6 shrink-0 justify-between">
            <h1 className="text-sm font-semibold text-foreground/80">
-              {project.info.jobName || "Untitled Project"} 
+              {project.info.jobName || "Untitled Project"}
               <span className="mx-2 text-muted-foreground">/</span>
               {navItems.find(i => i.href === location)?.label}
            </h1>
