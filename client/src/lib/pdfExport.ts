@@ -37,7 +37,7 @@ function drawHeader(doc: jsPDF, project: ProjectData) {
   doc.setFontSize(8);
   doc.setFont("helvetica", "normal");
   doc.text(`${project.info.jobNumber}  -  ${project.info.jobName}`, PAGE_W - MARGIN, 18, { align: "right" });
-  doc.text(project.info.date || "", PAGE_W - MARGIN, 30, { align: "right" });
+  doc.text(project.info.date || new Date().toLocaleDateString(), PAGE_W - MARGIN, 30, { align: "right" });
 }
 
 function drawFooter(doc: jsPDF, pageNum: number, totalPages: number) {
@@ -87,7 +87,7 @@ function generateProjectDataSheet(doc: jsPDF, project: ProjectData) {
   y = drawKeyValue(doc, "Job Number:", project.info.jobNumber, MARGIN + 6, y);
   y = drawKeyValue(doc, "Engineer:", project.info.engineer, MARGIN + 6, y);
   y = drawKeyValue(doc, "Location:", project.info.location, MARGIN + 6, y);
-  y = drawKeyValue(doc, "Date:", project.info.date, MARGIN + 6, y);
+  y = drawKeyValue(doc, "Date:", project.info.date || new Date().toLocaleDateString(), MARGIN + 6, y);
   y += 10;
 
   y = drawSectionTitle(doc, "PROJECT SUMMARY", y);

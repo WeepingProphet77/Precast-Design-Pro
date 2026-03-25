@@ -41,6 +41,7 @@ export default function PanelDesigner() {
   const [tool, setTool] = useState<"select" | "connection">("select");
   const [currentMousePos, setCurrentMousePos] = useState<{ x: number; y: number } | null>(null);
   const [snapIndicator, setSnapIndicator] = useState<{ x: number; y: number } | null>(null);
+  const [centroidHovered, setCentroidHovered] = useState(false);
 
   const [rectDialogOpen, setRectDialogOpen] = useState(false);
   const [rectWidth, setRectWidth] = useState(120);
@@ -788,8 +789,10 @@ export default function PanelDesigner() {
                     );
                   })}
 
-                  {centroidPos && hasGeometry && !hasDxfViews && (() => {
+                  {centroidPos && hasGeometry && (() => {
                     const s = screenFromCad(centroidPos.x, centroidPos.y);
+                    const cgColor = isCentroidSelected ? "#dc2626" : centroidHovered ? "#a855f7" : "#7c3aed";
+                    const cgStrokeWidth = isCentroidSelected || centroidHovered ? 2.5 : 2;
                     return (
                       <Group
                         x={s.x}
@@ -810,11 +813,21 @@ export default function PanelDesigner() {
                           e.cancelBubble = true;
                           setSelection({ kind: "centroid" });
                         }}
+                        onMouseEnter={(e) => {
+                          setCentroidHovered(true);
+                          const container = e.target.getStage()?.container();
+                          if (container) container.style.cursor = "pointer";
+                        }}
+                        onMouseLeave={(e) => {
+                          setCentroidHovered(false);
+                          const container = e.target.getStage()?.container();
+                          if (container) container.style.cursor = tool === "connection" ? "crosshair" : "default";
+                        }}
                       >
-                        <Circle radius={10} stroke={isCentroidSelected ? "#dc2626" : "#7c3aed"} strokeWidth={2} fill="transparent" />
-                        <Line points={[-10, 0, 10, 0]} stroke={isCentroidSelected ? "#dc2626" : "#7c3aed"} strokeWidth={1.5} />
-                        <Line points={[0, -10, 0, 10]} stroke={isCentroidSelected ? "#dc2626" : "#7c3aed"} strokeWidth={1.5} />
-                        <Text text="CG" x={12} y={-6} fontSize={10} fontStyle="bold" fill={isCentroidSelected ? "#dc2626" : "#7c3aed"} />
+                        <Circle radius={10} stroke={cgColor} strokeWidth={cgStrokeWidth} fill={isCentroidSelected || centroidHovered ? "rgba(124, 58, 237, 0.1)" : "transparent"} />
+                        <Line points={[-10, 0, 10, 0]} stroke={cgColor} strokeWidth={isCentroidSelected || centroidHovered ? 2 : 1.5} />
+                        <Line points={[0, -10, 0, 10]} stroke={cgColor} strokeWidth={isCentroidSelected || centroidHovered ? 2 : 1.5} />
+                        <Text text="CG" x={12} y={-6} fontSize={10} fontStyle="bold" fill={cgColor} />
                       </Group>
                     );
                   })()}
@@ -908,7 +921,7 @@ function PanelProperties({ panel }: { panel: Panel }) {
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
-                <Label className="text-[10px] uppercase">Thickness (in)</Label>
+                <Label className="text-[10px] uppercase">Nominal Thickness (in)</Label>
                 <Input
                   type="number"
                   value={panel.thickness}
@@ -947,10 +960,20 @@ function PanelProperties({ panel }: { panel: Panel }) {
                           title={view.showCentroid ? "Hide centroid" : "Show centroid"}
                           className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${view.showCentroid ? "bg-white/70 border-current" : "opacity-50 border-transparent"}`}
                           onClick={() => {
+                            const turningOn = !view.showCentroid;
                             const updatedViews = panel.dxfViews!.map((v, i) =>
                               i === idx ? { ...v, showCentroid: !v.showCentroid } : v
                             );
-                            updatePanel({ ...panel, dxfViews: updatedViews });
+                            if (turningOn) {
+                              // Reset panel CG to computed position, clearing manual override
+                              const perimPts = panel.perimeter;
+                              const centroid = perimPts.length >= 3
+                                ? calculateCentroid(perimPts, panel.openings)
+                                : { x: panel.width / 2, y: panel.height / 2 };
+                              updatePanel({ ...panel, dxfViews: updatedViews, centroidX: centroid.x, centroidY: centroid.y });
+                            } else {
+                              updatePanel({ ...panel, dxfViews: updatedViews });
+                            }
                           }}
                           data-testid={`button-centroid-toggle-${view.id}`}
                         >

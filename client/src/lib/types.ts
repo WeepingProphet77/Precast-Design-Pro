@@ -110,7 +110,7 @@ export interface ProjectInfo {
   jobNumber: string;
   engineer: string;
   location: string;
-  date: string;
+  date?: string;
   designStandard: "ASCE7-16" | "ASCE7-22";
   designMethod: "LRFD" | "ASD";
 }
@@ -127,7 +127,6 @@ export const createDefaultProject = (): ProjectData => ({
     jobNumber: "25-001",
     engineer: "",
     location: "",
-    date: new Date().toISOString().split("T")[0],
     designStandard: "ASCE7-16",
     designMethod: "LRFD",
   },
