@@ -91,8 +91,8 @@ export default function CapacityManager() {
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {project.capacities.map((cap) => (
-                            <TableRow key={cap.type} data-testid={`row-capacity-${cap.type}`}>
+                        {project.capacities.map((cap, idx) => (
+                            <TableRow key={idx} data-testid={`row-capacity-${cap.type}`}>
                                 <TableCell>
                                     <Input
                                         type="text"
