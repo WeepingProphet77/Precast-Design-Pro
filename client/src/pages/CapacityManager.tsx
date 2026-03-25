@@ -22,8 +22,8 @@ export default function CapacityManager() {
     if (!capacity) return;
 
     if (field === "type") {
-      // Type is the identifier — treat as string (preserve leading zeros, etc.)
-      updateCapacity({ ...capacity, type: value });
+      // Type is the identifier — pass old type so the store can find and rename it
+      updateCapacity({ ...capacity, type: value }, type);
     } else {
       updateCapacity({ ...capacity, [field]: Number(value) });
     }
