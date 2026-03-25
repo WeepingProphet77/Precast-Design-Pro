@@ -241,6 +241,13 @@ function drawPanelGeometry(doc: jsPDF, panel: Panel, x: number, y: number, maxW:
     const views = panel.dxfViews!;
     const allXs = views.flatMap(v => v.polygon.map(p => p.x));
     const allYs = views.flatMap(v => v.polygon.map(p => p.y));
+    // Include sketch line bounds so LINE entities aren't clipped
+    if (panel.sketchLines) {
+      panel.sketchLines.forEach(l => {
+        allXs.push(l.x1, l.x2);
+        allYs.push(l.y1, l.y2);
+      });
+    }
     const minX = Math.min(...allXs);
     const maxXp = Math.max(...allXs);
     const minY = Math.min(...allYs);
@@ -333,6 +340,19 @@ function drawPanelGeometry(doc: jsPDF, panel: Panel, x: number, y: number, maxW:
       doc.setTextColor(...COLORS.accent);
       doc.text(conn.label, cx + 5, cy - 2);
     });
+
+    // Render sketch lines (LINE entities) as display-only line segments
+    if (panel.sketchLines && panel.sketchLines.length > 0) {
+      doc.setDrawColor(71, 85, 105); // slate-600
+      doc.setLineWidth(0.5);
+      panel.sketchLines.forEach(l => {
+        const sx1 = ox + (l.x1 - minX) * scale;
+        const sy1 = oy + (ph - (l.y1 - minY)) * scale;
+        const sx2 = ox + (l.x2 - minX) * scale;
+        const sy2 = oy + (ph - (l.y2 - minY)) * scale;
+        doc.line(sx1, sy1, sx2, sy2);
+      });
+    }
 
     if (panel.dimensions && panel.dimensions.length > 0) {
       drawDimensionsOnPdf(doc, panel.dimensions, ox, oy, minX, minY, pw, ph, scale);
