@@ -735,22 +735,6 @@ export default function PanelDesigner() {
                     return null;
                   })}
 
-                  {hasDxfViews && activePanel.dxfViews!.map((view, viewIdx) => {
-                    if (!view.showCentroid) return null;
-                    const avgX = view.polygon.reduce((s, v) => s + v.x, 0) / view.polygon.length;
-                    const avgY = view.polygon.reduce((s, v) => s + v.y, 0) / view.polygon.length;
-                    const s = screenFromCad(avgX, avgY);
-                    const color = viewIdx === 0 ? "#7c3aed" : viewIdx === 1 ? "#15803d" : viewIdx === 2 ? "#854d0e" : "#7c3aed";
-                    return (
-                      <Group key={`cg-${view.id}`} x={s.x} y={s.y}>
-                        <Circle radius={8} stroke={color} strokeWidth={1.5} fill="transparent" />
-                        <Line points={[-8, 0, 8, 0]} stroke={color} strokeWidth={1.5} />
-                        <Line points={[0, -8, 0, 8]} stroke={color} strokeWidth={1.5} />
-                        <Text text="CG" x={10} y={-5} fontSize={9} fontStyle="bold" fill={color} />
-                      </Group>
-                    );
-                  })}
-
                   {activePanel.sketchLines?.map(l => {
                     const s1 = screenFromCad(l.x1, l.y1);
                     const s2 = screenFromCad(l.x2, l.y2);
