@@ -1,7 +1,7 @@
 
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { ProjectData, Panel, ConnectionNode } from "./types";
+import { ProjectData, Panel, ConnectionNode, DimensionAnnotation } from "./types";
 import { calculateLoadCombinations } from "./calculations";
 
 const MARGIN = 20;
@@ -174,6 +174,66 @@ function drawPolygon(doc: jsPDF, points: number[][], style: "F" | "S" | "FD" = "
 }
 
 
+function drawDimensionsOnPdf(
+  doc: jsPDF,
+  dimensions: DimensionAnnotation[],
+  ox: number, oy: number,
+  minX: number, minY: number,
+  pw: number, ph: number,
+  pdfScale: number
+) {
+  if (!dimensions || dimensions.length === 0) return;
+
+  dimensions.forEach(dim => {
+    const sx = ox + (dim.startX - minX) * pdfScale;
+    const sy = oy + (ph - (dim.startY - minY)) * pdfScale;
+    const ex = ox + (dim.endX - minX) * pdfScale;
+    const ey = oy + (ph - (dim.endY - minY)) * pdfScale;
+
+    const dxLine = ex - sx;
+    const dyLine = ey - sy;
+    const len = Math.sqrt(dxLine * dxLine + dyLine * dyLine) || 1;
+    const nx = -dyLine / len;
+    const ny = dxLine / len;
+
+    // Scale offset proportionally (the offset is in screen pixels, convert to PDF points)
+    const off = dim.offset * pdfScale / 3;
+
+    const d1x = sx + nx * off;
+    const d1y = sy + ny * off;
+    const d2x = ex + nx * off;
+    const d2y = ey + ny * off;
+
+    const ext = off > 0 ? 2 : -2;
+
+    doc.setDrawColor(3, 105, 161); // #0369a1
+    doc.setLineWidth(0.3);
+
+    // Extension lines
+    doc.line(sx, sy, d1x + nx * ext, d1y + ny * ext);
+    doc.line(ex, ey, d2x + nx * ext, d2y + ny * ext);
+
+    // Dimension line
+    doc.setLineWidth(0.5);
+    doc.line(d1x, d1y, d2x, d2y);
+
+    // Tick marks
+    doc.setLineWidth(0.6);
+    doc.line(d1x - nx * 2, d1y - ny * 2, d1x + nx * 2, d1y + ny * 2);
+    doc.line(d2x - nx * 2, d2y - ny * 2, d2x + nx * 2, d2y + ny * 2);
+
+    // Measurement text
+    const distance = Math.sqrt((dim.endX - dim.startX) ** 2 + (dim.endY - dim.startY) ** 2);
+    const textStr = `${distance.toFixed(2)}"`;
+    const mx = (d1x + d2x) / 2;
+    const my = (d1y + d2y) / 2;
+
+    doc.setFontSize(5);
+    doc.setTextColor(3, 105, 161);
+    doc.text(textStr, mx, my - 1, { align: "center" });
+  });
+}
+
 function drawPanelGeometry(doc: jsPDF, panel: Panel, x: number, y: number, maxW: number, maxH: number) {
   const hasDxfViews = panel.dxfViews && panel.dxfViews.length > 0;
 
@@ -273,6 +333,10 @@ function drawPanelGeometry(doc: jsPDF, panel: Panel, x: number, y: number, maxW:
       doc.setTextColor(...COLORS.accent);
       doc.text(conn.label, cx + 5, cy - 2);
     });
+
+    if (panel.dimensions && panel.dimensions.length > 0) {
+      drawDimensionsOnPdf(doc, panel.dimensions, ox, oy, minX, minY, pw, ph, scale);
+    }
     return;
   }
 
@@ -300,6 +364,10 @@ function drawPanelGeometry(doc: jsPDF, panel: Panel, x: number, y: number, maxW:
       doc.setTextColor(...COLORS.accent);
       doc.text(conn.label, cx + 5, cy - 2);
     });
+
+    if (panel.dimensions && panel.dimensions.length > 0) {
+      drawDimensionsOnPdf(doc, panel.dimensions, ox, oy, 0, 0, pw, ph, scale);
+    }
     return;
   }
 
@@ -390,6 +458,10 @@ function drawPanelGeometry(doc: jsPDF, panel: Panel, x: number, y: number, maxW:
     doc.line(cgx - 4, cgy, cgx + 4, cgy);
     doc.line(cgx, cgy - 4, cgx, cgy + 4);
     doc.circle(cgx, cgy, 3, "S");
+  }
+
+  if (panel.dimensions && panel.dimensions.length > 0) {
+    drawDimensionsOnPdf(doc, panel.dimensions, ox, oy, minX, minY, pw, ph, scale);
   }
 }
 

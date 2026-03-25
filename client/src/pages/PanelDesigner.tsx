@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Stage, Layer, Rect, Circle, Text, Group, Line, Shape, RegularPolygon } from "react-konva";
 import { useProject } from "@/lib/store";
-import { Panel, ConnectionNode, ConnectionMarker, Vertex, Opening, DxfView } from "@/lib/types";
+import { Panel, ConnectionNode, ConnectionMarker, Vertex, Opening, DxfView, DimensionAnnotation, DimensionSnapRef } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,7 +12,7 @@ import { calculateCentroid } from "@/lib/centroid";
 import { parseDxfFile } from "@/lib/dxfParser";
 import {
   Plus, Trash2, ZoomIn, ZoomOut, MousePointer2, Upload, Square as SquareIcon,
-  ArrowUpRight, Crosshair, RotateCcw
+  ArrowUpRight, Crosshair, RotateCcw, Ruler
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
@@ -26,10 +26,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 
-type SelectionType = { kind: "connection"; id: string } | { kind: "centroid" } | { kind: "viewCentroid"; viewId: string } | null;
+type SelectionType = { kind: "connection"; id: string } | { kind: "centroid" } | { kind: "viewCentroid"; viewId: string } | { kind: "dimension"; id: string } | null;
 
 export default function PanelDesigner() {
-  const { project, updatePanel, addPanel, deletePanel, updateConnection, addConnection, deleteConnection } = useProject();
+  const { project, updatePanel, addPanel, deletePanel, updateConnection, addConnection, deleteConnection, addDimension, deleteDimension } = useProject();
   const stageRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -38,10 +38,25 @@ export default function PanelDesigner() {
   const [activePanel, setActivePanel] = useState<Panel | undefined>(undefined);
   const [selection, setSelection] = useState<SelectionType>(null);
   const [scale, setScale] = useState(3);
-  const [tool, setTool] = useState<"select" | "connection">("select");
+  const [tool, setTool] = useState<"select" | "connection" | "dimension">("select");
   const [currentMousePos, setCurrentMousePos] = useState<{ x: number; y: number } | null>(null);
   const [snapIndicator, setSnapIndicator] = useState<{ x: number; y: number } | null>(null);
   const [centroidHovered, setCentroidHovered] = useState(false);
+
+  // Dimension tool state
+  const [dimFirstPoint, setDimFirstPoint] = useState<{ x: number; y: number; ref: DimensionSnapRef } | null>(null);
+  const [dimPreviewEnd, setDimPreviewEnd] = useState<{ x: number; y: number } | null>(null);
+  const [shiftHeld, setShiftHeld] = useState(false);
+
+  // Connection drag state for live dimensions
+  const [dragState, setDragState] = useState<{
+    connectionId: string;
+    originalX: number;
+    originalY: number;
+    currentX: number;
+    currentY: number;
+    axis: "h" | "v" | null;
+  } | null>(null);
 
   const [rectDialogOpen, setRectDialogOpen] = useState(false);
   const [rectWidth, setRectWidth] = useState(120);
@@ -106,6 +121,30 @@ export default function PanelDesigner() {
       pts.push({ x: l.x2, y: l.y2 });
     });
     (activePanel.importedNodes || []).forEach(n => pts.push(n));
+
+    // Connection locations
+    activePanel.connections.forEach(c => pts.push({ x: c.x, y: c.y }));
+
+    // CG markers
+    if (activePanel.centroidX !== undefined && activePanel.centroidY !== undefined) {
+      pts.push({ x: activePanel.centroidX, y: activePanel.centroidY });
+    }
+    if (activePanel.dxfViews) {
+      activePanel.dxfViews.forEach(v => {
+        if (v.showCentroid) {
+          const cx = v.centroidX ?? v.polygon.reduce((s, p) => s + p.x, 0) / v.polygon.length;
+          const cy = v.centroidY ?? v.polygon.reduce((s, p) => s + p.y, 0) / v.polygon.length;
+          pts.push({ x: cx, y: cy });
+        }
+      });
+    }
+
+    // Existing dimension endpoints
+    (activePanel.dimensions || []).forEach(d => {
+      pts.push({ x: d.startX, y: d.startY });
+      pts.push({ x: d.endX, y: d.endY });
+    });
+
     return pts;
   }, [activePanel]);
 
@@ -124,6 +163,44 @@ export default function PanelDesigner() {
     }
     return { ...closest, snapped };
   }, [getSnapPoints]);
+
+  const getSnapRef = useCallback((x: number, y: number): DimensionSnapRef => {
+    if (!activePanel) return { kind: "free" };
+    const tol = SNAP_TOLERANCE;
+    const dist = (a: number, b: number, c: number, d: number) => Math.sqrt((a - c) ** 2 + (b - d) ** 2);
+
+    // Check connections
+    for (const c of activePanel.connections) {
+      if (dist(x, y, c.x, c.y) < tol) return { kind: "connection", connectionId: c.id };
+    }
+    // Check CG
+    if (activePanel.centroidX !== undefined && activePanel.centroidY !== undefined) {
+      if (dist(x, y, activePanel.centroidX, activePanel.centroidY) < tol) return { kind: "centroid" };
+    }
+    // Check view centroids
+    if (activePanel.dxfViews) {
+      for (const v of activePanel.dxfViews) {
+        if (v.showCentroid) {
+          const cx = v.centroidX ?? v.polygon.reduce((s, p) => s + p.x, 0) / v.polygon.length;
+          const cy = v.centroidY ?? v.polygon.reduce((s, p) => s + p.y, 0) / v.polygon.length;
+          if (dist(x, y, cx, cy) < tol) return { kind: "viewCentroid", viewId: v.id };
+        }
+      }
+    }
+    // Check dimension endpoints
+    for (const d of (activePanel.dimensions || [])) {
+      if (dist(x, y, d.startX, d.startY) < tol) return { kind: "dimension", dimensionId: d.id, endpoint: "start" };
+      if (dist(x, y, d.endX, d.endY) < tol) return { kind: "dimension", dimensionId: d.id, endpoint: "end" };
+    }
+    // Check geometry vertices
+    const allVerts = activePanel.dxfViews && activePanel.dxfViews.length > 0
+      ? activePanel.dxfViews.flatMap(v => v.polygon)
+      : activePanel.perimeter;
+    for (const v of allVerts) {
+      if (dist(x, y, v.x, v.y) < tol) return { kind: "vertex", vertexId: v.id };
+    }
+    return { kind: "free" };
+  }, [activePanel]);
 
   const cadFromScreen = (screenX: number, screenY: number): { x: number; y: number } => {
     if (!activePanel) return { x: 0, y: 0 };
@@ -237,9 +314,21 @@ export default function PanelDesigner() {
     const cad = cadFromScreen(screenX - 80, screenY - 40);
     setCurrentMousePos(cad);
 
-    if (tool === "connection") {
+    if (tool === "connection" || tool === "dimension") {
       const snap = snapToPoint(cad.x, cad.y);
       setSnapIndicator(snap.snapped ? snap : null);
+
+      if (tool === "dimension" && dimFirstPoint) {
+        let endX = snap.snapped ? snap.x : cad.x;
+        let endY = snap.snapped ? snap.y : cad.y;
+        if (shiftHeld) {
+          const dx = Math.abs(endX - dimFirstPoint.x);
+          const dy = Math.abs(endY - dimFirstPoint.y);
+          if (dx >= dy) endY = dimFirstPoint.y;
+          else endX = dimFirstPoint.x;
+        }
+        setDimPreviewEnd({ x: endX, y: endY });
+      }
     } else {
       setSnapIndicator(null);
     }
@@ -281,6 +370,40 @@ export default function PanelDesigner() {
       setSelection({ kind: "connection", id });
       return;
     }
+
+    if (tool === "dimension" && activePanel) {
+      const snap = snapToPoint(cad.x, cad.y);
+      let ptX = snap.snapped ? snap.x : Math.round(cad.x * 10) / 10;
+      let ptY = snap.snapped ? snap.y : Math.round(cad.y * 10) / 10;
+
+      if (!dimFirstPoint) {
+        const ref = snap.snapped ? getSnapRef(ptX, ptY) : { kind: "free" as const };
+        setDimFirstPoint({ x: ptX, y: ptY, ref });
+      } else {
+        if (shiftHeld) {
+          const dx = Math.abs(ptX - dimFirstPoint.x);
+          const dy = Math.abs(ptY - dimFirstPoint.y);
+          if (dx >= dy) ptY = dimFirstPoint.y;
+          else ptX = dimFirstPoint.x;
+        }
+        const ref = snap.snapped ? getSnapRef(ptX, ptY) : { kind: "free" as const };
+        const dim: DimensionAnnotation = {
+          id: crypto.randomUUID(),
+          startX: dimFirstPoint.x,
+          startY: dimFirstPoint.y,
+          startRef: dimFirstPoint.ref,
+          endX: ptX,
+          endY: ptY,
+          endRef: ref,
+          offset: 20,
+        };
+        addDimension(activePanel.id, dim);
+        setDimFirstPoint(null);
+        setDimPreviewEnd(null);
+        setSelection({ kind: "dimension", id: dim.id });
+      }
+      return;
+    }
   };
 
   const onWheel = (e: any) => {
@@ -301,11 +424,23 @@ export default function PanelDesigner() {
   };
 
   useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { setTool("select"); }
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setTool("select");
+        setDimFirstPoint(null);
+        setDimPreviewEnd(null);
+      }
+      if (e.key === "Shift") setShiftHeld(true);
     };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "Shift") setShiftHeld(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
   }, []);
 
   if (!activePanel) {
@@ -523,6 +658,15 @@ export default function PanelDesigner() {
           >
             <Crosshair className="w-4 h-4 mr-1" /> Place Connection
           </Button>
+          <Button
+            variant={tool === "dimension" ? "default" : "outline"}
+            size="sm"
+            onClick={() => { setTool("dimension"); setDimFirstPoint(null); setDimPreviewEnd(null); }}
+            className="h-9"
+            data-testid="button-tool-dimension"
+          >
+            <Ruler className="w-4 h-4 mr-1" /> Dimension
+          </Button>
 
           <Dialog open={coordDialogOpen} onOpenChange={setCoordDialogOpen}>
             <DialogTrigger asChild>
@@ -581,6 +725,15 @@ export default function PanelDesigner() {
             </div>
           )}
 
+          {tool === "dimension" && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 bg-primary text-primary-foreground rounded-md px-4 py-1.5 shadow-sm text-xs font-medium">
+              {dimFirstPoint
+                ? "Click the second point to complete the dimension. Hold Shift for orthogonal constraint."
+                : "Click the first point for the dimension. Snap to geometry, connections, or CG markers."
+              }
+            </div>
+          )}
+
           {!hasGeometry && (
             <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
               <div className="bg-background/90 border rounded-lg p-8 text-center space-y-3 pointer-events-auto shadow-lg">
@@ -601,7 +754,7 @@ export default function PanelDesigner() {
             </div>
           )}
 
-          <div className={`flex-1 overflow-hidden ${tool === "connection" ? "cursor-crosshair" : "cursor-default"}`}>
+          <div className={`flex-1 overflow-hidden ${tool === "connection" || tool === "dimension" ? "cursor-crosshair" : "cursor-default"}`}>
             <Stage
               ref={stageRef}
               width={window.innerWidth}
@@ -872,12 +1025,58 @@ export default function PanelDesigner() {
                         x={s.x}
                         y={s.y}
                         draggable
-                        onDragEnd={(e) => {
+                        onDragStart={() => {
+                          setDragState({
+                            connectionId: c.id,
+                            originalX: c.x,
+                            originalY: c.y,
+                            currentX: c.x,
+                            currentY: c.y,
+                            axis: null,
+                          });
+                        }}
+                        onDragMove={(e) => {
                           const newScreenX = e.target.x();
                           const newScreenY = e.target.y();
-                          const newCad = cadFromScreen(newScreenX, newScreenY);
-                          updateConnection(activePanel.id, { ...c, x: Math.round(newCad.x * 10) / 10, y: Math.round(newCad.y * 10) / 10 });
-                          e.target.position({ x: newScreenX, y: newScreenY });
+                          const rawCad = cadFromScreen(newScreenX, newScreenY);
+
+                          const dx = rawCad.x - c.x;
+                          const dy = rawCad.y - c.y;
+                          let axis: "h" | "v" = Math.abs(dx) >= Math.abs(dy) ? "h" : "v";
+
+                          let snappedX: number, snappedY: number;
+                          if (axis === "h") {
+                            snappedX = c.x + Math.round(dx / 0.5) * 0.5;
+                            snappedY = c.y;
+                          } else {
+                            snappedX = c.x;
+                            snappedY = c.y + Math.round(dy / 0.5) * 0.5;
+                          }
+
+                          const snappedScreen = screenFromCad(snappedX, snappedY);
+                          e.target.position({ x: snappedScreen.x, y: snappedScreen.y });
+
+                          setDragState(prev => prev ? {
+                            ...prev,
+                            currentX: snappedX,
+                            currentY: snappedY,
+                            axis,
+                          } : null);
+                        }}
+                        onDragEnd={(e) => {
+                          if (dragState) {
+                            updateConnection(activePanel.id, {
+                              ...c,
+                              x: Math.round(dragState.currentX * 10) / 10,
+                              y: Math.round(dragState.currentY * 10) / 10,
+                            });
+                          }
+                          const finalScreen = screenFromCad(
+                            dragState?.currentX ?? c.x,
+                            dragState?.currentY ?? c.y
+                          );
+                          e.target.position({ x: finalScreen.x, y: finalScreen.y });
+                          setDragState(null);
                         }}
                         onClick={(e) => {
                           e.cancelBubble = true;
@@ -890,6 +1089,122 @@ export default function PanelDesigner() {
                       </Group>
                     );
                   })}
+
+                  {/* Permanent dimension annotations */}
+                  {(activePanel.dimensions || []).map(dim => {
+                    const s1 = screenFromCad(dim.startX, dim.startY);
+                    const s2 = screenFromCad(dim.endX, dim.endY);
+                    const distance = Math.sqrt((dim.endX - dim.startX) ** 2 + (dim.endY - dim.startY) ** 2);
+                    const isDimSelected = selection?.kind === "dimension" && selection.id === dim.id;
+
+                    // Calculate perpendicular offset direction
+                    const dx = s2.x - s1.x;
+                    const dy = s2.y - s1.y;
+                    const len = Math.sqrt(dx * dx + dy * dy) || 1;
+                    const nx = -dy / len;
+                    const ny = dx / len;
+                    const off = dim.offset;
+
+                    // Offset dimension line endpoints
+                    const d1x = s1.x + nx * off;
+                    const d1y = s1.y + ny * off;
+                    const d2x = s2.x + nx * off;
+                    const d2y = s2.y + ny * off;
+
+                    // Extension lines
+                    const ext = off > 0 ? 4 : -4;
+
+                    const dimColor = isDimSelected ? "#dc2626" : "#0369a1";
+                    const textStr = `${distance.toFixed(2)}"`;
+
+                    // Midpoint and angle for text
+                    const mx = (d1x + d2x) / 2;
+                    const my = (d1y + d2y) / 2;
+                    const angle = Math.atan2(d2y - d1y, d2x - d1x) * 180 / Math.PI;
+                    const textAngle = angle > 90 || angle < -90 ? angle + 180 : angle;
+
+                    return (
+                      <Group key={dim.id} onClick={(e) => { e.cancelBubble = true; setSelection({ kind: "dimension", id: dim.id }); }}>
+                        {/* Extension lines */}
+                        <Line points={[s1.x, s1.y, d1x + nx * ext, d1y + ny * ext]} stroke={dimColor} strokeWidth={0.8} />
+                        <Line points={[s2.x, s2.y, d2x + nx * ext, d2y + ny * ext]} stroke={dimColor} strokeWidth={0.8} />
+                        {/* Dimension line */}
+                        <Line points={[d1x, d1y, d2x, d2y]} stroke={dimColor} strokeWidth={1.2} />
+                        {/* Tick marks at ends */}
+                        <Line points={[d1x - nx * 4 - dx / len * 0, d1y - ny * 4, d1x + nx * 4, d1y + ny * 4]} stroke={dimColor} strokeWidth={1.5} />
+                        <Line points={[d2x - nx * 4, d2y - ny * 4, d2x + nx * 4, d2y + ny * 4]} stroke={dimColor} strokeWidth={1.5} />
+                        {/* Measurement text */}
+                        <Text
+                          text={textStr}
+                          x={mx}
+                          y={my}
+                          offsetX={textStr.length * 3}
+                          offsetY={12}
+                          fontSize={11}
+                          fontStyle="bold"
+                          fill={dimColor}
+                          rotation={textAngle}
+                        />
+                      </Group>
+                    );
+                  })}
+
+                  {/* Dimension preview while placing */}
+                  {tool === "dimension" && dimFirstPoint && dimPreviewEnd && (() => {
+                    const s1 = screenFromCad(dimFirstPoint.x, dimFirstPoint.y);
+                    const s2 = screenFromCad(dimPreviewEnd.x, dimPreviewEnd.y);
+                    const distance = Math.sqrt((dimPreviewEnd.x - dimFirstPoint.x) ** 2 + (dimPreviewEnd.y - dimFirstPoint.y) ** 2);
+                    const off = 20;
+                    const dx = s2.x - s1.x;
+                    const dy = s2.y - s1.y;
+                    const len = Math.sqrt(dx * dx + dy * dy) || 1;
+                    const nx = -dy / len;
+                    const ny = dx / len;
+                    const d1x = s1.x + nx * off;
+                    const d1y = s1.y + ny * off;
+                    const d2x = s2.x + nx * off;
+                    const d2y = s2.y + ny * off;
+                    const ext = 4;
+                    const mx = (d1x + d2x) / 2;
+                    const my = (d1y + d2y) / 2;
+                    const angle = Math.atan2(d2y - d1y, d2x - d1x) * 180 / Math.PI;
+                    const textAngle = angle > 90 || angle < -90 ? angle + 180 : angle;
+                    const textStr = `${distance.toFixed(2)}"`;
+
+                    return (
+                      <Group>
+                        <Line points={[s1.x, s1.y, d1x + nx * ext, d1y + ny * ext]} stroke="#0369a1" strokeWidth={0.8} opacity={0.5} />
+                        <Line points={[s2.x, s2.y, d2x + nx * ext, d2y + ny * ext]} stroke="#0369a1" strokeWidth={0.8} opacity={0.5} />
+                        <Line points={[d1x, d1y, d2x, d2y]} stroke="#0369a1" strokeWidth={1.2} dash={[4, 4]} opacity={0.5} />
+                        <Line points={[d1x - nx * 4, d1y - ny * 4, d1x + nx * 4, d1y + ny * 4]} stroke="#0369a1" strokeWidth={1.5} opacity={0.5} />
+                        <Line points={[d2x - nx * 4, d2y - ny * 4, d2x + nx * 4, d2y + ny * 4]} stroke="#0369a1" strokeWidth={1.5} opacity={0.5} />
+                        <Text text={textStr} x={mx} y={my} offsetX={textStr.length * 3} offsetY={12} fontSize={11} fontStyle="bold" fill="#0369a1" opacity={0.6} rotation={textAngle} />
+                        {/* Start point indicator */}
+                        <Circle x={s1.x} y={s1.y} radius={4} fill="#0369a1" opacity={0.6} />
+                      </Group>
+                    );
+                  })()}
+
+                  {/* Live dimension during connection drag */}
+                  {dragState && dragState.axis && (() => {
+                    const s1 = screenFromCad(dragState.originalX, dragState.originalY);
+                    const s2 = screenFromCad(dragState.currentX, dragState.currentY);
+                    const distance = Math.sqrt((dragState.currentX - dragState.originalX) ** 2 + (dragState.currentY - dragState.originalY) ** 2);
+                    if (distance < 0.01) return null;
+                    const textStr = `${distance.toFixed(2)}"`;
+                    const mx = (s1.x + s2.x) / 2;
+                    const my = (s1.y + s2.y) / 2;
+                    const textOffY = dragState.axis === "h" ? -14 : 0;
+                    const textOffX = dragState.axis === "v" ? 8 : 0;
+                    return (
+                      <Group>
+                        <Line points={[s1.x, s1.y, s2.x, s2.y]} stroke="#f59e0b" strokeWidth={1.5} dash={[6, 4]} />
+                        <Circle x={s1.x} y={s1.y} radius={3} fill="#f59e0b" opacity={0.7} />
+                        <Circle x={s2.x} y={s2.y} radius={3} fill="#f59e0b" opacity={0.7} />
+                        <Text text={textStr} x={mx + textOffX} y={my + textOffY} fontSize={11} fontStyle="bold" fill="#f59e0b" />
+                      </Group>
+                    );
+                  })()}
 
                   {snapIndicator && (() => {
                     const s = screenFromCad(snapIndicator.x, snapIndicator.y);
@@ -921,6 +1236,8 @@ export default function PanelDesigner() {
             <CentroidProperties panel={activePanel} computedCentroid={computedCentroid} onDeselect={() => setSelection(null)} />
           ) : selection?.kind === "viewCentroid" ? (
             <ViewCentroidProperties panel={activePanel} viewId={selection.viewId} onDeselect={() => setSelection(null)} />
+          ) : selection?.kind === "dimension" ? (
+            <DimensionProperties panelId={activePanel.id} dimensionId={selection.id} onDeselect={() => setSelection(null)} />
           ) : (
             <PanelProperties panel={activePanel} />
           )}
@@ -1203,6 +1520,56 @@ function ViewCentroidProperties({ panel, viewId, onDeselect }: { panel: Panel; v
         <Button variant="outline" size="sm" onClick={resetToComputed} className="w-full" data-testid="button-reset-view-centroid">
           <RotateCcw className="w-3 h-3 mr-1" /> Reset to Computed
         </Button>
+      </div>
+    </div>
+  );
+}
+
+function DimensionProperties({ panelId, dimensionId, onDeselect }: { panelId: string; dimensionId: string; onDeselect: () => void }) {
+  const { project, updateDimension, deleteDimension } = useProject();
+  const panel = project.panels.find(p => p.id === panelId);
+  const dim = panel?.dimensions?.find(d => d.id === dimensionId);
+  if (!dim) return null;
+
+  const distance = Math.sqrt((dim.endX - dim.startX) ** 2 + (dim.endY - dim.startY) ** 2);
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex justify-between items-center">
+        <h3 className="font-bold text-sm text-primary" data-testid="text-dimension-title">Dimension Annotation</h3>
+        <div className="flex gap-1">
+          <Button variant="ghost" size="sm" onClick={onDeselect} data-testid="button-deselect-dimension">
+            <MousePointer2 className="w-4 h-4" />
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => { deleteDimension(panelId, dimensionId); onDeselect(); }} data-testid="button-delete-dimension">
+            <Trash2 className="w-4 h-4 text-destructive" />
+          </Button>
+        </div>
+      </div>
+
+      <div className="p-3 bg-muted/20 rounded border">
+        <div className="text-lg font-mono font-bold text-center">{distance.toFixed(2)}"</div>
+        <div className="text-xs text-muted-foreground text-center mt-1">Measured Distance</div>
+      </div>
+
+      <div className="space-y-2">
+        <div className="text-[10px] uppercase font-semibold text-muted-foreground">Start Point</div>
+        <div className="text-xs font-mono">({dim.startX.toFixed(2)}, {dim.startY.toFixed(2)})</div>
+      </div>
+      <div className="space-y-2">
+        <div className="text-[10px] uppercase font-semibold text-muted-foreground">End Point</div>
+        <div className="text-xs font-mono">({dim.endX.toFixed(2)}, {dim.endY.toFixed(2)})</div>
+      </div>
+
+      <div className="space-y-1">
+        <Label className="text-[10px] uppercase">Line Offset (px)</Label>
+        <Input
+          type="number"
+          value={dim.offset}
+          onChange={e => updateDimension(panelId, { ...dim, offset: Number(e.target.value) })}
+          className="h-8 text-xs font-mono"
+          data-testid="input-dimension-offset"
+        />
       </div>
     </div>
   );
