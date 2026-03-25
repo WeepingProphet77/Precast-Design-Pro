@@ -89,6 +89,8 @@ export interface Panel {
   sketchLines: SketchLine[];
   connections: ConnectionNode[];
   dimensions?: DimensionAnnotation[];
+  userLines?: UserDrawnLine[];
+  loadAnnotations?: LoadAnnotation[];
   importedNodes?: { x: number; y: number }[];
   dxfViews?: DxfView[];
 }
@@ -118,6 +120,34 @@ export interface DimensionAnnotation {
   endY: number;
   endRef: DimensionSnapRef;
   offset: number; // perpendicular offset for dimension line placement
+}
+
+export interface UserDrawnLine {
+  id: string;
+  x1: number;
+  y1: number;
+  startRef: DimensionSnapRef;
+  x2: number;
+  y2: number;
+  endRef: DimensionSnapRef;
+  lineType: "solid" | "hidden";
+}
+
+export type LoadAnnotationType = "line_load" | "point_vertical" | "point_horizontal" | "point_out_of_plane";
+
+export interface LoadAnnotation {
+  id: string;
+  type: LoadAnnotationType;
+  // For line loads: start/end points
+  startX: number;
+  startY: number;
+  startRef: DimensionSnapRef;
+  endX: number;
+  endY: number;
+  endRef: DimensionSnapRef;
+  // For point loads: direction
+  direction?: "up" | "down" | "left" | "right" | "toward" | "away";
+  label: string;
 }
 
 export interface ConnectionCapacity {

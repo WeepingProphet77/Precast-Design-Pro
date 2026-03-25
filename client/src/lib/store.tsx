@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
-import { ProjectData, createDefaultProject, Panel, ConnectionNode, ProjectInfo, ConnectionCapacity, DimensionAnnotation } from "./types";
+import { ProjectData, createDefaultProject, Panel, ConnectionNode, ProjectInfo, ConnectionCapacity, DimensionAnnotation, UserDrawnLine, LoadAnnotation } from "./types";
 
 const CACHE_KEY = "precastpro_project_cache";
 const FILENAME_KEY = "precastpro_current_filename";
@@ -66,6 +66,12 @@ interface ProjectContextType {
   addDimension: (panelId: string, dimension: DimensionAnnotation) => void;
   updateDimension: (panelId: string, dimension: DimensionAnnotation) => void;
   deleteDimension: (panelId: string, dimensionId: string) => void;
+  addUserLine: (panelId: string, line: UserDrawnLine) => void;
+  updateUserLine: (panelId: string, line: UserDrawnLine) => void;
+  deleteUserLine: (panelId: string, lineId: string) => void;
+  addLoadAnnotation: (panelId: string, annotation: LoadAnnotation) => void;
+  updateLoadAnnotation: (panelId: string, annotation: LoadAnnotation) => void;
+  deleteLoadAnnotation: (panelId: string, annotationId: string) => void;
   updateCapacity: (capacity: ConnectionCapacity, oldType?: string) => void;
   addCapacity: (capacity: ConnectionCapacity) => void;
   deleteCapacity: (type: string) => void;
@@ -128,6 +134,8 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
       sketchLines: [],
       connections: [],
       dimensions: [],
+      userLines: [],
+      loadAnnotations: [],
     };
     setProject((prev) => ({ ...prev, panels: [...prev.panels, newPanel] }));
     return newPanel.id;
@@ -211,6 +219,66 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
           ...p,
           dimensions: (p.dimensions || []).filter((d) => d.id !== dimensionId),
         };
+      }),
+    }));
+  };
+
+  const addUserLine = (panelId: string, line: UserDrawnLine) => {
+    setProject((prev) => ({
+      ...prev,
+      panels: prev.panels.map((p) => {
+        if (p.id !== panelId) return p;
+        return { ...p, userLines: [...(p.userLines || []), line] };
+      }),
+    }));
+  };
+
+  const updateUserLine = (panelId: string, line: UserDrawnLine) => {
+    setProject((prev) => ({
+      ...prev,
+      panels: prev.panels.map((p) => {
+        if (p.id !== panelId) return p;
+        return { ...p, userLines: (p.userLines || []).map((l) => (l.id === line.id ? line : l)) };
+      }),
+    }));
+  };
+
+  const deleteUserLine = (panelId: string, lineId: string) => {
+    setProject((prev) => ({
+      ...prev,
+      panels: prev.panels.map((p) => {
+        if (p.id !== panelId) return p;
+        return { ...p, userLines: (p.userLines || []).filter((l) => l.id !== lineId) };
+      }),
+    }));
+  };
+
+  const addLoadAnnotation = (panelId: string, annotation: LoadAnnotation) => {
+    setProject((prev) => ({
+      ...prev,
+      panels: prev.panels.map((p) => {
+        if (p.id !== panelId) return p;
+        return { ...p, loadAnnotations: [...(p.loadAnnotations || []), annotation] };
+      }),
+    }));
+  };
+
+  const updateLoadAnnotation = (panelId: string, annotation: LoadAnnotation) => {
+    setProject((prev) => ({
+      ...prev,
+      panels: prev.panels.map((p) => {
+        if (p.id !== panelId) return p;
+        return { ...p, loadAnnotations: (p.loadAnnotations || []).map((a) => (a.id === annotation.id ? annotation : a)) };
+      }),
+    }));
+  };
+
+  const deleteLoadAnnotation = (panelId: string, annotationId: string) => {
+    setProject((prev) => ({
+      ...prev,
+      panels: prev.panels.map((p) => {
+        if (p.id !== panelId) return p;
+        return { ...p, loadAnnotations: (p.loadAnnotations || []).filter((a) => a.id !== annotationId) };
       }),
     }));
   };
@@ -377,6 +445,12 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
         addDimension,
         updateDimension,
         deleteDimension,
+        addUserLine,
+        updateUserLine,
+        deleteUserLine,
+        addLoadAnnotation,
+        updateLoadAnnotation,
+        deleteLoadAnnotation,
         updateCapacity,
         addCapacity,
         deleteCapacity,

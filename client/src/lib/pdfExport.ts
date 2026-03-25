@@ -1,7 +1,7 @@
 
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { ProjectData, Panel, ConnectionNode, DimensionAnnotation } from "./types";
+import { ProjectData, Panel, ConnectionNode, DimensionAnnotation, UserDrawnLine, LoadAnnotation } from "./types";
 import { calculateLoadCombinations } from "./calculations";
 
 const MARGIN = 20;
@@ -234,6 +234,152 @@ function drawDimensionsOnPdf(
   });
 }
 
+function drawUserLinesOnPdf(
+  doc: jsPDF,
+  userLines: UserDrawnLine[],
+  ox: number, oy: number,
+  minX: number, minY: number,
+  pw: number, ph: number,
+  pdfScale: number
+) {
+  if (!userLines || userLines.length === 0) return;
+
+  userLines.forEach(line => {
+    const sx = ox + (line.x1 - minX) * pdfScale;
+    const sy = oy + (ph - (line.y1 - minY)) * pdfScale;
+    const ex = ox + (line.x2 - minX) * pdfScale;
+    const ey = oy + (ph - (line.y2 - minY)) * pdfScale;
+
+    doc.setDrawColor(51, 65, 85); // slate-700
+    doc.setLineWidth(0.5);
+
+    if (line.lineType === "hidden") {
+      // Dashed line for hidden lines
+      const dx = ex - sx;
+      const dy = ey - sy;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      if (len < 0.1) return;
+      const dashLen = 4;
+      const gapLen = 2;
+      const ux = dx / len;
+      const uy = dy / len;
+      let d = 0;
+      while (d < len) {
+        const segEnd = Math.min(d + dashLen, len);
+        doc.line(
+          sx + ux * d, sy + uy * d,
+          sx + ux * segEnd, sy + uy * segEnd
+        );
+        d = segEnd + gapLen;
+      }
+    } else {
+      doc.line(sx, sy, ex, ey);
+    }
+  });
+}
+
+function drawLoadAnnotationsOnPdf(
+  doc: jsPDF,
+  annotations: LoadAnnotation[],
+  ox: number, oy: number,
+  minX: number, minY: number,
+  pw: number, ph: number,
+  pdfScale: number
+) {
+  if (!annotations || annotations.length === 0) return;
+
+  const loadColor: [number, number, number] = [185, 28, 28]; // red-700
+
+  annotations.forEach(ann => {
+    doc.setDrawColor(...loadColor);
+    doc.setFillColor(...loadColor);
+    doc.setTextColor(...loadColor);
+
+    if (ann.type === "line_load") {
+      const sx = ox + (ann.startX - minX) * pdfScale;
+      const sy = oy + (ph - (ann.startY - minY)) * pdfScale;
+      const ex = ox + (ann.endX - minX) * pdfScale;
+      const ey = oy + (ph - (ann.endY - minY)) * pdfScale;
+
+      // Base line
+      doc.setLineWidth(0.5);
+      doc.line(sx, sy, ex, ey);
+
+      // Arrows along the line
+      const dx = ex - sx;
+      const dy = ey - sy;
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      const ux = dx / len;
+      const uy = dy / len;
+      const px = -uy;
+      const py = ux;
+      const arrowLen = 6;
+      const arrowCount = Math.max(2, Math.floor(len / 12));
+
+      doc.setLineWidth(0.3);
+      for (let i = 0; i <= arrowCount; i++) {
+        const t = arrowCount === 0 ? 0.5 : i / arrowCount;
+        const bx = sx + dx * t;
+        const by = sy + dy * t;
+        const tx = bx + px * arrowLen;
+        const ty = by + py * arrowLen;
+        doc.line(bx, by, tx, ty);
+        // Arrow head
+        doc.line(tx, ty, tx - (px * 1.5 + ux * 1.5), ty - (py * 1.5 + uy * 1.5));
+        doc.line(tx, ty, tx - (px * 1.5 - ux * 1.5), ty - (py * 1.5 - uy * 1.5));
+      }
+
+      if (ann.label) {
+        const mx = (sx + ex) / 2 + px * (arrowLen + 4);
+        const my = (sy + ey) / 2 + py * (arrowLen + 4);
+        doc.setFontSize(5);
+        doc.text(ann.label, mx, my);
+      }
+      return;
+    }
+
+    // Point loads
+    const px = ox + (ann.startX - minX) * pdfScale;
+    const py = oy + (ph - (ann.startY - minY)) * pdfScale;
+    const arrowSize = 8;
+
+    if (ann.type === "point_vertical") {
+      const dir = ann.direction === "up" ? -1 : 1;
+      doc.setLineWidth(0.5);
+      doc.line(px, py, px, py + arrowSize * dir);
+      doc.line(px - 2, py + arrowSize * dir - 3 * dir, px, py + arrowSize * dir);
+      doc.line(px + 2, py + arrowSize * dir - 3 * dir, px, py + arrowSize * dir);
+      if (ann.label) {
+        doc.setFontSize(5);
+        doc.text(ann.label, px + 3, py + (dir > 0 ? 2 : -2));
+      }
+    } else if (ann.type === "point_horizontal") {
+      const dir = ann.direction === "left" ? -1 : 1;
+      doc.setLineWidth(0.5);
+      doc.line(px, py, px + arrowSize * dir, py);
+      doc.line(px + arrowSize * dir - 3 * dir, py - 2, px + arrowSize * dir, py);
+      doc.line(px + arrowSize * dir - 3 * dir, py + 2, px + arrowSize * dir, py);
+      if (ann.label) {
+        doc.setFontSize(5);
+        doc.text(ann.label, px + (dir > 0 ? arrowSize + 2 : -arrowSize - 8), py - 2);
+      }
+    } else if (ann.type === "point_out_of_plane") {
+      doc.setLineWidth(0.4);
+      doc.circle(px, py, 3.5, "S");
+      if (ann.direction === "toward") {
+        doc.circle(px, py, 0.8, "F");
+      } else {
+        doc.line(px - 2, py - 2, px + 2, py + 2);
+        doc.line(px - 2, py + 2, px + 2, py - 2);
+      }
+      if (ann.label) {
+        doc.setFontSize(5);
+        doc.text(ann.label, px + 5, py - 1);
+      }
+    }
+  });
+}
+
 function drawPanelGeometry(doc: jsPDF, panel: Panel, x: number, y: number, maxW: number, maxH: number) {
   const hasDxfViews = panel.dxfViews && panel.dxfViews.length > 0;
 
@@ -357,6 +503,8 @@ function drawPanelGeometry(doc: jsPDF, panel: Panel, x: number, y: number, maxW:
     if (panel.dimensions && panel.dimensions.length > 0) {
       drawDimensionsOnPdf(doc, panel.dimensions, ox, oy, minX, minY, pw, ph, scale);
     }
+    drawUserLinesOnPdf(doc, panel.userLines || [], ox, oy, minX, minY, pw, ph, scale);
+    drawLoadAnnotationsOnPdf(doc, panel.loadAnnotations || [], ox, oy, minX, minY, pw, ph, scale);
     return;
   }
 
@@ -388,6 +536,8 @@ function drawPanelGeometry(doc: jsPDF, panel: Panel, x: number, y: number, maxW:
     if (panel.dimensions && panel.dimensions.length > 0) {
       drawDimensionsOnPdf(doc, panel.dimensions, ox, oy, 0, 0, pw, ph, scale);
     }
+    drawUserLinesOnPdf(doc, panel.userLines || [], ox, oy, 0, 0, pw, ph, scale);
+    drawLoadAnnotationsOnPdf(doc, panel.loadAnnotations || [], ox, oy, 0, 0, pw, ph, scale);
     return;
   }
 
@@ -483,6 +633,8 @@ function drawPanelGeometry(doc: jsPDF, panel: Panel, x: number, y: number, maxW:
   if (panel.dimensions && panel.dimensions.length > 0) {
     drawDimensionsOnPdf(doc, panel.dimensions, ox, oy, minX, minY, pw, ph, scale);
   }
+  drawUserLinesOnPdf(doc, panel.userLines || [], ox, oy, minX, minY, pw, ph, scale);
+  drawLoadAnnotationsOnPdf(doc, panel.loadAnnotations || [], ox, oy, minX, minY, pw, ph, scale);
 }
 
 function generatePanelPage(doc: jsPDF, project: ProjectData, panel: Panel) {
