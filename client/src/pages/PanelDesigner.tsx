@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Stage, Layer, Rect, Circle, Text, Group, Line, Shape, RegularPolygon } from "react-konva";
 import { useProject } from "@/lib/store";
-import { Panel, ConnectionNode, ConnectionMarker, Vertex, Opening, DxfView, DimensionAnnotation, DimensionSnapRef } from "@/lib/types";
+import { Panel, ConnectionNode, ConnectionMarker, Vertex, Opening, DxfView, DimensionAnnotation, DimensionSnapRef, UserDrawnLine, LoadAnnotation, LoadAnnotationType } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,7 +12,9 @@ import { calculateCentroid } from "@/lib/centroid";
 import { parseDxfFile } from "@/lib/dxfParser";
 import {
   Plus, Trash2, ZoomIn, ZoomOut, MousePointer2, Upload, Square as SquareIcon,
-  ArrowUpRight, Crosshair, RotateCcw, Ruler
+  ArrowUpRight, Crosshair, RotateCcw, Ruler, Minus, MoreHorizontal,
+  ArrowDown, ArrowUp, ArrowLeft, ArrowRight, Circle as CircleIcon,
+  MoveHorizontal, ChevronDown, Pencil
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
@@ -24,12 +26,17 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 
-type SelectionType = { kind: "connection"; id: string } | { kind: "centroid" } | { kind: "viewCentroid"; viewId: string } | { kind: "dimension"; id: string } | null;
+type SelectionType = { kind: "connection"; id: string } | { kind: "centroid" } | { kind: "viewCentroid"; viewId: string } | { kind: "dimension"; id: string } | { kind: "userLine"; id: string } | { kind: "loadAnnotation"; id: string } | null;
+
+type ToolType = "select" | "connection" | "dimension" | "line_solid" | "line_hidden" | "load_line" | "load_point_vertical" | "load_point_horizontal" | "load_point_oop";
 
 export default function PanelDesigner() {
-  const { project, updatePanel, addPanel, deletePanel, updateConnection, addConnection, deleteConnection, addDimension, deleteDimension } = useProject();
+  const { project, updatePanel, addPanel, deletePanel, updateConnection, addConnection, deleteConnection, addDimension, deleteDimension, addUserLine, updateUserLine, deleteUserLine, addLoadAnnotation, updateLoadAnnotation, deleteLoadAnnotation } = useProject();
   const stageRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -38,7 +45,7 @@ export default function PanelDesigner() {
   const [activePanel, setActivePanel] = useState<Panel | undefined>(undefined);
   const [selection, setSelection] = useState<SelectionType>(null);
   const [scale, setScale] = useState(3);
-  const [tool, setTool] = useState<"select" | "connection" | "dimension">("select");
+  const [tool, setTool] = useState<ToolType>("select");
   const [currentMousePos, setCurrentMousePos] = useState<{ x: number; y: number } | null>(null);
   const [snapIndicator, setSnapIndicator] = useState<{ x: number; y: number } | null>(null);
   const [centroidHovered, setCentroidHovered] = useState(false);
@@ -47,6 +54,14 @@ export default function PanelDesigner() {
   const [dimFirstPoint, setDimFirstPoint] = useState<{ x: number; y: number; ref: DimensionSnapRef } | null>(null);
   const [dimPreviewEnd, setDimPreviewEnd] = useState<{ x: number; y: number } | null>(null);
   const [shiftHeld, setShiftHeld] = useState(false);
+
+  // User-drawn line tool state
+  const [lineFirstPoint, setLineFirstPoint] = useState<{ x: number; y: number; ref: DimensionSnapRef } | null>(null);
+  const [linePreviewEnd, setLinePreviewEnd] = useState<{ x: number; y: number } | null>(null);
+
+  // Load line annotation tool state
+  const [loadLineFirstPoint, setLoadLineFirstPoint] = useState<{ x: number; y: number; ref: DimensionSnapRef } | null>(null);
+  const [loadLinePreviewEnd, setLoadLinePreviewEnd] = useState<{ x: number; y: number } | null>(null);
 
   // Connection drag state for live dimensions
   const [dragState, setDragState] = useState<{
@@ -143,6 +158,20 @@ export default function PanelDesigner() {
     (activePanel.dimensions || []).forEach(d => {
       pts.push({ x: d.startX, y: d.startY });
       pts.push({ x: d.endX, y: d.endY });
+    });
+
+    // User-drawn line endpoints
+    (activePanel.userLines || []).forEach(l => {
+      pts.push({ x: l.x1, y: l.y1 });
+      pts.push({ x: l.x2, y: l.y2 });
+    });
+
+    // Load annotation points
+    (activePanel.loadAnnotations || []).forEach(a => {
+      pts.push({ x: a.startX, y: a.startY });
+      if (a.type === "line_load") {
+        pts.push({ x: a.endX, y: a.endY });
+      }
     });
 
     return pts;
@@ -314,7 +343,8 @@ export default function PanelDesigner() {
     const cad = cadFromScreen(screenX - 80, screenY - 40);
     setCurrentMousePos(cad);
 
-    if (tool === "connection" || tool === "dimension") {
+    const isDrawingTool = tool !== "select";
+    if (isDrawingTool) {
       const snap = snapToPoint(cad.x, cad.y);
       setSnapIndicator(snap.snapped ? snap : null);
 
@@ -328,6 +358,30 @@ export default function PanelDesigner() {
           else endX = dimFirstPoint.x;
         }
         setDimPreviewEnd({ x: endX, y: endY });
+      }
+
+      if ((tool === "line_solid" || tool === "line_hidden") && lineFirstPoint) {
+        let endX = snap.snapped ? snap.x : cad.x;
+        let endY = snap.snapped ? snap.y : cad.y;
+        if (shiftHeld) {
+          const dx = Math.abs(endX - lineFirstPoint.x);
+          const dy = Math.abs(endY - lineFirstPoint.y);
+          if (dx >= dy) endY = lineFirstPoint.y;
+          else endX = lineFirstPoint.x;
+        }
+        setLinePreviewEnd({ x: endX, y: endY });
+      }
+
+      if (tool === "load_line" && loadLineFirstPoint) {
+        let endX = snap.snapped ? snap.x : cad.x;
+        let endY = snap.snapped ? snap.y : cad.y;
+        if (shiftHeld) {
+          const dx = Math.abs(endX - loadLineFirstPoint.x);
+          const dy = Math.abs(endY - loadLineFirstPoint.y);
+          if (dx >= dy) endY = loadLineFirstPoint.y;
+          else endX = loadLineFirstPoint.x;
+        }
+        setLoadLinePreviewEnd({ x: endX, y: endY });
       }
     } else {
       setSnapIndicator(null);
@@ -404,6 +458,109 @@ export default function PanelDesigner() {
       }
       return;
     }
+
+    if ((tool === "line_solid" || tool === "line_hidden") && activePanel) {
+      const snap = snapToPoint(cad.x, cad.y);
+      let ptX = snap.snapped ? snap.x : Math.round(cad.x * 10) / 10;
+      let ptY = snap.snapped ? snap.y : Math.round(cad.y * 10) / 10;
+
+      if (!lineFirstPoint) {
+        const ref = snap.snapped ? getSnapRef(ptX, ptY) : { kind: "free" as const };
+        setLineFirstPoint({ x: ptX, y: ptY, ref });
+      } else {
+        if (shiftHeld) {
+          const dx = Math.abs(ptX - lineFirstPoint.x);
+          const dy = Math.abs(ptY - lineFirstPoint.y);
+          if (dx >= dy) ptY = lineFirstPoint.y;
+          else ptX = lineFirstPoint.x;
+        }
+        const ref = snap.snapped ? getSnapRef(ptX, ptY) : { kind: "free" as const };
+        const line: UserDrawnLine = {
+          id: crypto.randomUUID(),
+          x1: lineFirstPoint.x,
+          y1: lineFirstPoint.y,
+          startRef: lineFirstPoint.ref,
+          x2: ptX,
+          y2: ptY,
+          endRef: ref,
+          lineType: tool === "line_solid" ? "solid" : "hidden",
+        };
+        addUserLine(activePanel.id, line);
+        setLineFirstPoint(null);
+        setLinePreviewEnd(null);
+        setSelection({ kind: "userLine", id: line.id });
+      }
+      return;
+    }
+
+    if (tool === "load_line" && activePanel) {
+      const snap = snapToPoint(cad.x, cad.y);
+      let ptX = snap.snapped ? snap.x : Math.round(cad.x * 10) / 10;
+      let ptY = snap.snapped ? snap.y : Math.round(cad.y * 10) / 10;
+
+      if (!loadLineFirstPoint) {
+        const ref = snap.snapped ? getSnapRef(ptX, ptY) : { kind: "free" as const };
+        setLoadLineFirstPoint({ x: ptX, y: ptY, ref });
+      } else {
+        if (shiftHeld) {
+          const dx = Math.abs(ptX - loadLineFirstPoint.x);
+          const dy = Math.abs(ptY - loadLineFirstPoint.y);
+          if (dx >= dy) ptY = loadLineFirstPoint.y;
+          else ptX = loadLineFirstPoint.x;
+        }
+        const ref = snap.snapped ? getSnapRef(ptX, ptY) : { kind: "free" as const };
+        const annotation: LoadAnnotation = {
+          id: crypto.randomUUID(),
+          type: "line_load",
+          startX: loadLineFirstPoint.x,
+          startY: loadLineFirstPoint.y,
+          startRef: loadLineFirstPoint.ref,
+          endX: ptX,
+          endY: ptY,
+          endRef: ref,
+          label: "",
+        };
+        addLoadAnnotation(activePanel.id, annotation);
+        setLoadLineFirstPoint(null);
+        setLoadLinePreviewEnd(null);
+        setSelection({ kind: "loadAnnotation", id: annotation.id });
+      }
+      return;
+    }
+
+    if ((tool === "load_point_vertical" || tool === "load_point_horizontal" || tool === "load_point_oop") && activePanel) {
+      const snap = snapToPoint(cad.x, cad.y);
+      const ptX = snap.snapped ? snap.x : Math.round(cad.x * 10) / 10;
+      const ptY = snap.snapped ? snap.y : Math.round(cad.y * 10) / 10;
+      const ref = snap.snapped ? getSnapRef(ptX, ptY) : { kind: "free" as const };
+
+      const typeMap: Record<string, LoadAnnotationType> = {
+        load_point_vertical: "point_vertical",
+        load_point_horizontal: "point_horizontal",
+        load_point_oop: "point_out_of_plane",
+      };
+      const directionMap: Record<string, "down" | "right" | "toward"> = {
+        load_point_vertical: "down",
+        load_point_horizontal: "right",
+        load_point_oop: "toward",
+      };
+
+      const annotation: LoadAnnotation = {
+        id: crypto.randomUUID(),
+        type: typeMap[tool],
+        startX: ptX,
+        startY: ptY,
+        startRef: ref,
+        endX: ptX,
+        endY: ptY,
+        endRef: ref,
+        direction: directionMap[tool],
+        label: "",
+      };
+      addLoadAnnotation(activePanel.id, annotation);
+      setSelection({ kind: "loadAnnotation", id: annotation.id });
+      return;
+    }
   };
 
   const onWheel = (e: any) => {
@@ -429,6 +586,10 @@ export default function PanelDesigner() {
         setTool("select");
         setDimFirstPoint(null);
         setDimPreviewEnd(null);
+        setLineFirstPoint(null);
+        setLinePreviewEnd(null);
+        setLoadLineFirstPoint(null);
+        setLoadLinePreviewEnd(null);
       }
       if (e.key === "Shift") setShiftHeld(true);
     };
@@ -639,7 +800,7 @@ export default function PanelDesigner() {
 
         <Separator orientation="vertical" className="h-6" />
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <Button
             variant={tool === "select" ? "default" : "outline"}
             size="sm"
@@ -649,6 +810,10 @@ export default function PanelDesigner() {
           >
             <MousePointer2 className="w-4 h-4 mr-1" /> Select
           </Button>
+
+          <Separator orientation="vertical" className="h-5 mx-0.5" />
+
+          {/* Element tools */}
           <Button
             variant={tool === "connection" ? "default" : "outline"}
             size="sm"
@@ -656,22 +821,12 @@ export default function PanelDesigner() {
             className="h-9"
             data-testid="button-tool-connection"
           >
-            <Crosshair className="w-4 h-4 mr-1" /> Place Connection
+            <Crosshair className="w-4 h-4 mr-1" /> Connection
           </Button>
-          <Button
-            variant={tool === "dimension" ? "default" : "outline"}
-            size="sm"
-            onClick={() => { setTool("dimension"); setDimFirstPoint(null); setDimPreviewEnd(null); }}
-            className="h-9"
-            data-testid="button-tool-dimension"
-          >
-            <Ruler className="w-4 h-4 mr-1" /> Dimension
-          </Button>
-
           <Dialog open={coordDialogOpen} onOpenChange={setCoordDialogOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" size="sm" className="h-9" data-testid="button-add-by-coord">
-                <ArrowUpRight className="w-4 h-4 mr-1" /> By Coordinates
+                <ArrowUpRight className="w-4 h-4 mr-1" /> XY
               </Button>
             </DialogTrigger>
             <DialogContent className="sm:max-w-[380px]">
@@ -694,6 +849,73 @@ export default function PanelDesigner() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
+
+          <Separator orientation="vertical" className="h-5 mx-0.5" />
+
+          {/* Annotation tools */}
+          <Button
+            variant={tool === "dimension" ? "default" : "outline"}
+            size="sm"
+            onClick={() => { setTool("dimension"); setDimFirstPoint(null); setDimPreviewEnd(null); }}
+            className="h-9"
+            data-testid="button-tool-dimension"
+          >
+            <Ruler className="w-4 h-4 mr-1" /> Dim
+          </Button>
+
+          <Separator orientation="vertical" className="h-5 mx-0.5" />
+
+          {/* Drawing tools */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant={(tool === "line_solid" || tool === "line_hidden") ? "default" : "outline"}
+                size="sm"
+                className="h-9"
+                data-testid="button-tool-draw-menu"
+              >
+                <Pencil className="w-4 h-4 mr-1" /> Draw <ChevronDown className="w-3 h-3 ml-1" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem onClick={() => { setTool("line_solid"); setLineFirstPoint(null); setLinePreviewEnd(null); }} data-testid="button-tool-line-solid">
+                <Minus className="w-4 h-4 mr-2" /> Solid Line
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { setTool("line_hidden"); setLineFirstPoint(null); setLinePreviewEnd(null); }} data-testid="button-tool-line-hidden">
+                <MoreHorizontal className="w-4 h-4 mr-2" /> Hidden Line
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <Separator orientation="vertical" className="h-5 mx-0.5" />
+
+          {/* Load annotation tools */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant={(tool === "load_line" || tool === "load_point_vertical" || tool === "load_point_horizontal" || tool === "load_point_oop") ? "default" : "outline"}
+                size="sm"
+                className="h-9"
+                data-testid="button-tool-load-menu"
+              >
+                <ArrowDown className="w-4 h-4 mr-1" /> Loads <ChevronDown className="w-3 h-3 ml-1" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem onClick={() => { setTool("load_line"); setLoadLineFirstPoint(null); setLoadLinePreviewEnd(null); }} data-testid="button-tool-load-line">
+                <MoveHorizontal className="w-4 h-4 mr-2" /> Line Load
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setTool("load_point_vertical")} data-testid="button-tool-load-vertical">
+                <ArrowDown className="w-4 h-4 mr-2" /> Vertical Point Load
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setTool("load_point_horizontal")} data-testid="button-tool-load-horizontal">
+                <ArrowRight className="w-4 h-4 mr-2" /> Horizontal Point Load
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setTool("load_point_oop")} data-testid="button-tool-load-oop">
+                <CircleIcon className="w-4 h-4 mr-2" /> Out-of-Plane Point Load
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         <div className="flex-1" />
@@ -734,6 +956,30 @@ export default function PanelDesigner() {
             </div>
           )}
 
+          {(tool === "line_solid" || tool === "line_hidden") && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 bg-primary text-primary-foreground rounded-md px-4 py-1.5 shadow-sm text-xs font-medium">
+              {lineFirstPoint
+                ? `Click the second point to complete the ${tool === "line_solid" ? "solid" : "hidden"} line. Hold Shift for orthogonal.`
+                : `Click the first point for the ${tool === "line_solid" ? "solid" : "hidden (dashed)"} line.`
+              }
+            </div>
+          )}
+
+          {tool === "load_line" && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 bg-primary text-primary-foreground rounded-md px-4 py-1.5 shadow-sm text-xs font-medium">
+              {loadLineFirstPoint
+                ? "Click the second point to complete the line load. Hold Shift for orthogonal."
+                : "Click the first point to define the line load extent."
+              }
+            </div>
+          )}
+
+          {(tool === "load_point_vertical" || tool === "load_point_horizontal" || tool === "load_point_oop") && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 bg-primary text-primary-foreground rounded-md px-4 py-1.5 shadow-sm text-xs font-medium">
+              Click to place a {tool === "load_point_vertical" ? "vertical" : tool === "load_point_horizontal" ? "horizontal" : "out-of-plane"} point load. Press Escape to cancel.
+            </div>
+          )}
+
           {!hasGeometry && (
             <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
               <div className="bg-background/90 border rounded-lg p-8 text-center space-y-3 pointer-events-auto shadow-lg">
@@ -754,7 +1000,7 @@ export default function PanelDesigner() {
             </div>
           )}
 
-          <div className={`flex-1 overflow-hidden ${tool === "connection" || tool === "dimension" ? "cursor-crosshair" : "cursor-default"}`}>
+          <div className={`flex-1 overflow-hidden ${tool !== "select" ? "cursor-crosshair" : "cursor-default"}`}>
             <Stage
               ref={stageRef}
               width={window.innerWidth}
@@ -1090,6 +1336,172 @@ export default function PanelDesigner() {
                     );
                   })}
 
+                  {/* User-drawn lines */}
+                  {(activePanel.userLines || []).map(line => {
+                    const s1 = screenFromCad(line.x1, line.y1);
+                    const s2 = screenFromCad(line.x2, line.y2);
+                    const isLineSelected = selection?.kind === "userLine" && selection.id === line.id;
+                    const lineColor = isLineSelected ? "#dc2626" : "#334155";
+                    return (
+                      <Group key={line.id} onClick={(e) => { e.cancelBubble = true; setSelection({ kind: "userLine", id: line.id }); }}>
+                        <Line
+                          points={[s1.x, s1.y, s2.x, s2.y]}
+                          stroke={lineColor}
+                          strokeWidth={isLineSelected ? 2.5 : 1.8}
+                          dash={line.lineType === "hidden" ? [10, 5] : undefined}
+                          hitStrokeWidth={12}
+                        />
+                        {isLineSelected && (
+                          <>
+                            <Circle x={s1.x} y={s1.y} radius={5} fill="#dc2626" opacity={0.7} draggable
+                              onDragEnd={(e) => {
+                                const newCad = cadFromScreen(e.target.x(), e.target.y());
+                                const snap = snapToPoint(newCad.x, newCad.y);
+                                const nx = snap.snapped ? snap.x : Math.round(newCad.x * 10) / 10;
+                                const ny = snap.snapped ? snap.y : Math.round(newCad.y * 10) / 10;
+                                const ref = snap.snapped ? getSnapRef(nx, ny) : { kind: "free" as const };
+                                updateUserLine(activePanel.id, { ...line, x1: nx, y1: ny, startRef: ref });
+                              }}
+                            />
+                            <Circle x={s2.x} y={s2.y} radius={5} fill="#dc2626" opacity={0.7} draggable
+                              onDragEnd={(e) => {
+                                const newCad = cadFromScreen(e.target.x(), e.target.y());
+                                const snap = snapToPoint(newCad.x, newCad.y);
+                                const nx = snap.snapped ? snap.x : Math.round(newCad.x * 10) / 10;
+                                const ny = snap.snapped ? snap.y : Math.round(newCad.y * 10) / 10;
+                                const ref = snap.snapped ? getSnapRef(nx, ny) : { kind: "free" as const };
+                                updateUserLine(activePanel.id, { ...line, x2: nx, y2: ny, endRef: ref });
+                              }}
+                            />
+                          </>
+                        )}
+                      </Group>
+                    );
+                  })}
+
+                  {/* Load annotations */}
+                  {(activePanel.loadAnnotations || []).map(ann => {
+                    const isAnnSelected = selection?.kind === "loadAnnotation" && selection.id === ann.id;
+                    const loadColor = isAnnSelected ? "#dc2626" : "#b91c1c";
+
+                    if (ann.type === "line_load") {
+                      const s1 = screenFromCad(ann.startX, ann.startY);
+                      const s2 = screenFromCad(ann.endX, ann.endY);
+                      const dx = s2.x - s1.x;
+                      const dy = s2.y - s1.y;
+                      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+                      const ux = dx / len;
+                      const uy = dy / len;
+                      // Perpendicular (outward arrows)
+                      const px = -uy;
+                      const py = ux;
+                      const arrowLen = 18;
+                      const arrowCount = Math.max(2, Math.floor(len / 30));
+                      const arrows: React.ReactElement[] = [];
+                      for (let i = 0; i <= arrowCount; i++) {
+                        const t = arrowCount === 0 ? 0.5 : i / arrowCount;
+                        const bx = s1.x + dx * t;
+                        const by = s1.y + dy * t;
+                        const tx = bx + px * arrowLen;
+                        const ty = by + py * arrowLen;
+                        arrows.push(
+                          <Line key={`arr-${i}`} points={[bx, by, tx, ty]} stroke={loadColor} strokeWidth={1.5} />,
+                          <Line key={`arh-${i}`} points={[tx - (px * 4 + ux * 4), ty - (py * 4 + uy * 4), tx, ty, tx - (px * 4 - ux * 4), ty - (py * 4 - uy * 4)]} stroke={loadColor} strokeWidth={1.5} />
+                        );
+                      }
+                      const labelX = (s1.x + s2.x) / 2 + px * (arrowLen + 10);
+                      const labelY = (s1.y + s2.y) / 2 + py * (arrowLen + 10);
+                      return (
+                        <Group key={ann.id} onClick={(e) => { e.cancelBubble = true; setSelection({ kind: "loadAnnotation", id: ann.id }); }}>
+                          <Line points={[s1.x, s1.y, s2.x, s2.y]} stroke={loadColor} strokeWidth={2} hitStrokeWidth={12} />
+                          {arrows}
+                          {ann.label && <Text text={ann.label} x={labelX} y={labelY - 6} fontSize={10} fill={loadColor} fontStyle="bold" />}
+                          {isAnnSelected && (
+                            <>
+                              <Circle x={s1.x} y={s1.y} radius={5} fill="#dc2626" opacity={0.7} />
+                              <Circle x={s2.x} y={s2.y} radius={5} fill="#dc2626" opacity={0.7} />
+                            </>
+                          )}
+                        </Group>
+                      );
+                    }
+
+                    // Point loads
+                    const s = screenFromCad(ann.startX, ann.startY);
+                    const arrowSize = 24;
+
+                    if (ann.type === "point_vertical") {
+                      const dir = ann.direction === "up" ? -1 : 1;
+                      return (
+                        <Group key={ann.id} x={s.x} y={s.y} draggable
+                          onDragEnd={(e) => {
+                            const newCad = cadFromScreen(e.target.x(), e.target.y());
+                            const snap = snapToPoint(newCad.x, newCad.y);
+                            const nx = snap.snapped ? snap.x : Math.round(newCad.x / 0.5) * 0.5;
+                            const ny = snap.snapped ? snap.y : Math.round(newCad.y / 0.5) * 0.5;
+                            updateLoadAnnotation(activePanel.id, { ...ann, startX: nx, startY: ny, endX: nx, endY: ny });
+                          }}
+                          onClick={(e) => { e.cancelBubble = true; setSelection({ kind: "loadAnnotation", id: ann.id }); }}
+                        >
+                          <Line points={[0, 0, 0, arrowSize * dir]} stroke={loadColor} strokeWidth={2.5} />
+                          <Line points={[-6, arrowSize * dir - 8 * dir, 0, arrowSize * dir, 6, arrowSize * dir - 8 * dir]} stroke={loadColor} strokeWidth={2.5} />
+                          {ann.label && <Text text={ann.label} x={8} y={dir > 0 ? 4 : -14} fontSize={10} fill={loadColor} fontStyle="bold" />}
+                        </Group>
+                      );
+                    }
+
+                    if (ann.type === "point_horizontal") {
+                      const dir = ann.direction === "left" ? -1 : 1;
+                      return (
+                        <Group key={ann.id} x={s.x} y={s.y} draggable
+                          onDragEnd={(e) => {
+                            const newCad = cadFromScreen(e.target.x(), e.target.y());
+                            const snap = snapToPoint(newCad.x, newCad.y);
+                            const nx = snap.snapped ? snap.x : Math.round(newCad.x / 0.5) * 0.5;
+                            const ny = snap.snapped ? snap.y : Math.round(newCad.y / 0.5) * 0.5;
+                            updateLoadAnnotation(activePanel.id, { ...ann, startX: nx, startY: ny, endX: nx, endY: ny });
+                          }}
+                          onClick={(e) => { e.cancelBubble = true; setSelection({ kind: "loadAnnotation", id: ann.id }); }}
+                        >
+                          <Line points={[0, 0, arrowSize * dir, 0]} stroke={loadColor} strokeWidth={2.5} />
+                          <Line points={[arrowSize * dir - 8 * dir, -6, arrowSize * dir, 0, arrowSize * dir - 8 * dir, 6]} stroke={loadColor} strokeWidth={2.5} />
+                          {ann.label && <Text text={ann.label} x={dir > 0 ? arrowSize + 4 : -arrowSize - 30} y={-14} fontSize={10} fill={loadColor} fontStyle="bold" />}
+                        </Group>
+                      );
+                    }
+
+                    if (ann.type === "point_out_of_plane") {
+                      const isToward = ann.direction === "toward";
+                      return (
+                        <Group key={ann.id} x={s.x} y={s.y} draggable
+                          onDragEnd={(e) => {
+                            const newCad = cadFromScreen(e.target.x(), e.target.y());
+                            const snap = snapToPoint(newCad.x, newCad.y);
+                            const nx = snap.snapped ? snap.x : Math.round(newCad.x / 0.5) * 0.5;
+                            const ny = snap.snapped ? snap.y : Math.round(newCad.y / 0.5) * 0.5;
+                            updateLoadAnnotation(activePanel.id, { ...ann, startX: nx, startY: ny, endX: nx, endY: ny });
+                          }}
+                          onClick={(e) => { e.cancelBubble = true; setSelection({ kind: "loadAnnotation", id: ann.id }); }}
+                        >
+                          <Circle radius={10} stroke={loadColor} strokeWidth={2} fill="transparent" />
+                          {isToward ? (
+                            // Dot in center = coming toward viewer
+                            <Circle radius={3} fill={loadColor} />
+                          ) : (
+                            // X = going away from viewer
+                            <>
+                              <Line points={[-6, -6, 6, 6]} stroke={loadColor} strokeWidth={2} />
+                              <Line points={[-6, 6, 6, -6]} stroke={loadColor} strokeWidth={2} />
+                            </>
+                          )}
+                          {ann.label && <Text text={ann.label} x={14} y={-6} fontSize={10} fill={loadColor} fontStyle="bold" />}
+                        </Group>
+                      );
+                    }
+
+                    return null;
+                  })}
+
                   {/* Permanent dimension annotations */}
                   {(activePanel.dimensions || []).map(dim => {
                     const s1 = screenFromCad(dim.startX, dim.startY);
@@ -1185,6 +1597,48 @@ export default function PanelDesigner() {
                     );
                   })()}
 
+                  {/* Line drawing preview */}
+                  {(tool === "line_solid" || tool === "line_hidden") && lineFirstPoint && linePreviewEnd && (() => {
+                    const s1 = screenFromCad(lineFirstPoint.x, lineFirstPoint.y);
+                    const s2 = screenFromCad(linePreviewEnd.x, linePreviewEnd.y);
+                    const distance = Math.sqrt((linePreviewEnd.x - lineFirstPoint.x) ** 2 + (linePreviewEnd.y - lineFirstPoint.y) ** 2);
+                    const textStr = `${distance.toFixed(2)}"`;
+                    const mx = (s1.x + s2.x) / 2;
+                    const my = (s1.y + s2.y) / 2;
+                    return (
+                      <Group>
+                        <Line
+                          points={[s1.x, s1.y, s2.x, s2.y]}
+                          stroke="#334155"
+                          strokeWidth={1.8}
+                          dash={tool === "line_hidden" ? [10, 5] : undefined}
+                          opacity={0.6}
+                        />
+                        <Circle x={s1.x} y={s1.y} radius={4} fill="#334155" opacity={0.6} />
+                        {/* Temporary dimension */}
+                        <Line points={[s1.x, s1.y, s2.x, s2.y]} stroke="#f59e0b" strokeWidth={1} dash={[6, 4]} opacity={0.5} />
+                        <Text text={textStr} x={mx + 6} y={my - 14} fontSize={11} fontStyle="bold" fill="#f59e0b" opacity={0.7} />
+                      </Group>
+                    );
+                  })()}
+
+                  {/* Load line annotation preview */}
+                  {tool === "load_line" && loadLineFirstPoint && loadLinePreviewEnd && (() => {
+                    const s1 = screenFromCad(loadLineFirstPoint.x, loadLineFirstPoint.y);
+                    const s2 = screenFromCad(loadLinePreviewEnd.x, loadLinePreviewEnd.y);
+                    const distance = Math.sqrt((loadLinePreviewEnd.x - loadLineFirstPoint.x) ** 2 + (loadLinePreviewEnd.y - loadLineFirstPoint.y) ** 2);
+                    const textStr = `${distance.toFixed(2)}"`;
+                    const mx = (s1.x + s2.x) / 2;
+                    const my = (s1.y + s2.y) / 2;
+                    return (
+                      <Group>
+                        <Line points={[s1.x, s1.y, s2.x, s2.y]} stroke="#b91c1c" strokeWidth={2} opacity={0.5} />
+                        <Circle x={s1.x} y={s1.y} radius={4} fill="#b91c1c" opacity={0.6} />
+                        <Text text={textStr} x={mx + 6} y={my - 14} fontSize={11} fontStyle="bold" fill="#f59e0b" opacity={0.7} />
+                      </Group>
+                    );
+                  })()}
+
                   {/* Live dimension during connection drag */}
                   {dragState && dragState.axis && (() => {
                     const s1 = screenFromCad(dragState.originalX, dragState.originalY);
@@ -1238,6 +1692,10 @@ export default function PanelDesigner() {
             <ViewCentroidProperties panel={activePanel} viewId={selection.viewId} onDeselect={() => setSelection(null)} />
           ) : selection?.kind === "dimension" ? (
             <DimensionProperties panelId={activePanel.id} dimensionId={selection.id} onDeselect={() => setSelection(null)} />
+          ) : selection?.kind === "userLine" ? (
+            <UserLineProperties panelId={activePanel.id} lineId={selection.id} onDeselect={() => setSelection(null)} />
+          ) : selection?.kind === "loadAnnotation" ? (
+            <LoadAnnotationProperties panelId={activePanel.id} annotationId={selection.id} onDeselect={() => setSelection(null)} />
           ) : (
             <PanelProperties panel={activePanel} />
           )}
@@ -1582,6 +2040,152 @@ function DimensionProperties({ panelId, dimensionId, onDeselect }: { panelId: st
           className="h-8 text-xs font-mono"
           data-testid="input-dimension-offset"
         />
+      </div>
+    </div>
+  );
+}
+
+function UserLineProperties({ panelId, lineId, onDeselect }: { panelId: string; lineId: string; onDeselect: () => void }) {
+  const { project, deleteUserLine } = useProject();
+  const panel = project.panels.find(p => p.id === panelId);
+  const line = panel?.userLines?.find(l => l.id === lineId);
+  if (!line) return null;
+
+  const distance = Math.sqrt((line.x2 - line.x1) ** 2 + (line.y2 - line.y1) ** 2);
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex justify-between items-center">
+        <h3 className="font-bold text-sm text-primary" data-testid="text-userline-title">
+          {line.lineType === "solid" ? "Solid Line" : "Hidden Line"}
+        </h3>
+        <div className="flex gap-1">
+          <Button variant="ghost" size="sm" onClick={onDeselect} data-testid="button-deselect-userline">
+            <MousePointer2 className="w-4 h-4" />
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => { deleteUserLine(panelId, lineId); onDeselect(); }} data-testid="button-delete-userline">
+            <Trash2 className="w-4 h-4 text-destructive" />
+          </Button>
+        </div>
+      </div>
+
+      <div className="p-3 bg-muted/20 rounded border">
+        <div className="text-lg font-mono font-bold text-center">{distance.toFixed(2)}"</div>
+        <div className="text-xs text-muted-foreground text-center mt-1">Line Length</div>
+      </div>
+
+      <div className="space-y-2">
+        <div className="text-[10px] uppercase font-semibold text-muted-foreground">Start Point</div>
+        <div className="text-xs font-mono">({line.x1.toFixed(2)}, {line.y1.toFixed(2)})</div>
+      </div>
+      <div className="space-y-2">
+        <div className="text-[10px] uppercase font-semibold text-muted-foreground">End Point</div>
+        <div className="text-xs font-mono">({line.x2.toFixed(2)}, {line.y2.toFixed(2)})</div>
+      </div>
+      <div className="text-xs text-muted-foreground">
+        <p>Drag endpoints on canvas to adjust. Press Delete or use the trash icon to remove.</p>
+      </div>
+    </div>
+  );
+}
+
+function LoadAnnotationProperties({ panelId, annotationId, onDeselect }: { panelId: string; annotationId: string; onDeselect: () => void }) {
+  const { project, updateLoadAnnotation, deleteLoadAnnotation } = useProject();
+  const panel = project.panels.find(p => p.id === panelId);
+  const ann = panel?.loadAnnotations?.find(a => a.id === annotationId);
+  if (!ann) return null;
+
+  const typeLabels: Record<string, string> = {
+    line_load: "Line Load",
+    point_vertical: "Vertical Point Load",
+    point_horizontal: "Horizontal Point Load",
+    point_out_of_plane: "Out-of-Plane Point Load",
+  };
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex justify-between items-center">
+        <h3 className="font-bold text-sm text-primary" data-testid="text-load-annotation-title">
+          {typeLabels[ann.type] || "Load Annotation"}
+        </h3>
+        <div className="flex gap-1">
+          <Button variant="ghost" size="sm" onClick={onDeselect} data-testid="button-deselect-load">
+            <MousePointer2 className="w-4 h-4" />
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => { deleteLoadAnnotation(panelId, annotationId); onDeselect(); }} data-testid="button-delete-load">
+            <Trash2 className="w-4 h-4 text-destructive" />
+          </Button>
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <Label className="text-[10px] uppercase">Label</Label>
+        <Input
+          value={ann.label}
+          onChange={e => updateLoadAnnotation(panelId, { ...ann, label: e.target.value })}
+          placeholder='e.g. "25 psf wind" or "P = 5 kips"'
+          className="h-8 text-xs"
+          data-testid="input-load-label"
+        />
+      </div>
+
+      {ann.type === "line_load" && (
+        <>
+          <div className="space-y-2">
+            <div className="text-[10px] uppercase font-semibold text-muted-foreground">Start Point</div>
+            <div className="text-xs font-mono">({ann.startX.toFixed(2)}, {ann.startY.toFixed(2)})</div>
+          </div>
+          <div className="space-y-2">
+            <div className="text-[10px] uppercase font-semibold text-muted-foreground">End Point</div>
+            <div className="text-xs font-mono">({ann.endX.toFixed(2)}, {ann.endY.toFixed(2)})</div>
+          </div>
+        </>
+      )}
+
+      {ann.type !== "line_load" && (
+        <>
+          <div className="space-y-2">
+            <div className="text-[10px] uppercase font-semibold text-muted-foreground">Location</div>
+            <div className="text-xs font-mono">({ann.startX.toFixed(2)}, {ann.startY.toFixed(2)})</div>
+          </div>
+          {ann.direction && (
+            <div className="space-y-1">
+              <Label className="text-[10px] uppercase">Direction</Label>
+              <Select
+                value={ann.direction}
+                onValueChange={(val) => updateLoadAnnotation(panelId, { ...ann, direction: val as any })}
+              >
+                <SelectTrigger className="h-8 text-xs" data-testid="select-load-direction">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ann.type === "point_vertical" && (
+                    <>
+                      <SelectItem value="down">Down</SelectItem>
+                      <SelectItem value="up">Up</SelectItem>
+                    </>
+                  )}
+                  {ann.type === "point_horizontal" && (
+                    <>
+                      <SelectItem value="right">Right</SelectItem>
+                      <SelectItem value="left">Left</SelectItem>
+                    </>
+                  )}
+                  {ann.type === "point_out_of_plane" && (
+                    <>
+                      <SelectItem value="toward">Toward Viewer</SelectItem>
+                      <SelectItem value="away">Away from Viewer</SelectItem>
+                    </>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+        </>
+      )}
+
+      <div className="text-xs text-muted-foreground">
+        <p>Drag to reposition. Edit the label above to annotate the load.</p>
       </div>
     </div>
   );
