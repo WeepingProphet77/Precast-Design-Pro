@@ -63,7 +63,7 @@ interface ProjectContextType {
   updateConnection: (panelId: string, connection: ConnectionNode) => void;
   addConnection: (panelId: string, connection: ConnectionNode) => void;
   deleteConnection: (panelId: string, connectionId: string) => void;
-  updateCapacity: (capacity: ConnectionCapacity) => void;
+  updateCapacity: (capacity: ConnectionCapacity, oldType?: string) => void;
   addCapacity: (capacity: ConnectionCapacity) => void;
   deleteCapacity: (type: string) => void;
   saveProjectToFile: () => void;
@@ -174,10 +174,22 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }));
   };
 
-  const updateCapacity = (capacity: ConnectionCapacity) => {
+  const updateCapacity = (capacity: ConnectionCapacity, oldType?: string) => {
+    const matchType = oldType ?? capacity.type;
     setProject((prev) => ({
       ...prev,
-      capacities: prev.capacities.map((c) => (c.type === capacity.type ? capacity : c)),
+      capacities: prev.capacities.map((c) => (c.type === matchType ? capacity : c)),
+      // Also update any panel connections that reference the old type
+      ...(oldType && oldType !== capacity.type
+        ? {
+            panels: prev.panels.map((p) => ({
+              ...p,
+              connections: p.connections.map((conn) =>
+                conn.type === oldType ? { ...conn, type: capacity.type } : conn
+              ),
+            })),
+          }
+        : {}),
     }));
   };
 
