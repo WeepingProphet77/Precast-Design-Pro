@@ -1142,7 +1142,7 @@ function ConnectionProperties({ panelId, connectionId, onDeselect }: { panelId: 
                 <SelectContent>
                   {project.capacities.map(cap => (
                     <SelectItem key={cap.type} value={cap.type}>
-                      {cap.type}{cap.name ? ` — ${cap.name}` : ""}
+                      {cap.type}
                     </SelectItem>
                   ))}
                 </SelectContent>

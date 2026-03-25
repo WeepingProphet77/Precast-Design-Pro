@@ -21,9 +21,7 @@ export default function CapacityManager() {
     const capacity = project.capacities.find(c => c.type === type);
     if (!capacity) return;
 
-    if (field === "name") {
-      updateCapacity({ ...capacity, name: value });
-    } else if (field === "type") {
+    if (field === "type") {
       // Type is the identifier — treat as string (preserve leading zeros, etc.)
       updateCapacity({ ...capacity, type: value });
     } else {
@@ -67,13 +65,12 @@ export default function CapacityManager() {
             <CardHeader className="flex flex-row items-center justify-between">
                 <div>
                     <CardTitle>Capacity Limits ({project.info.designMethod === "ASD" ? "ASD" : "LRFD"})</CardTitle>
-                    <CardDescription>Enter design capacities in lbs. Type IDs can be letters, numbers, or codes (e.g. 01, A1, 001).</CardDescription>
+                    <CardDescription>Enter design capacities in lbs. Connection types can be any letters, numbers, or codes (e.g. 01, A1, 001).</CardDescription>
                 </div>
                 <Button onClick={() => {
                     const nextType = getNextTypeId();
                     addCapacity({
                         type: nextType,
-                        name: "",
                         capacityX: 5000,
                         capacityY: 5000,
                         capacityZ: 5000
@@ -86,8 +83,7 @@ export default function CapacityManager() {
                 <Table>
                     <TableHeader>
                         <TableRow>
-                            <TableHead className="w-[100px]">Type ID</TableHead>
-                            <TableHead className="w-[180px]">Name</TableHead>
+                            <TableHead className="w-[150px]">Connection Type</TableHead>
                             <TableHead>X-Capacity (Shear/Normal)</TableHead>
                             <TableHead>Y-Capacity (Gravity)</TableHead>
                             <TableHead>Z-Capacity (Tie-back)</TableHead>
@@ -102,18 +98,8 @@ export default function CapacityManager() {
                                         type="text"
                                         value={cap.type}
                                         onChange={(e) => handleUpdate(cap.type, 'type', e.target.value)}
-                                        className="font-bold text-lg max-w-[80px] font-mono"
+                                        className="font-bold text-lg max-w-[140px] font-mono"
                                         data-testid={`input-capacity-type-${cap.type}`}
-                                    />
-                                </TableCell>
-                                <TableCell>
-                                    <Input
-                                        type="text"
-                                        value={cap.name}
-                                        onChange={(e) => handleUpdate(cap.type, 'name', e.target.value)}
-                                        placeholder="Optional name..."
-                                        className="max-w-[170px]"
-                                        data-testid={`input-capacity-name-${cap.type}`}
                                     />
                                 </TableCell>
                                 <TableCell>
