@@ -16,7 +16,6 @@ const projectSchema = z.object({
   jobNumber: z.string().min(1, "Job number is required"),
   engineer: z.string().min(1, "Engineer name is required"),
   location: z.string().min(1, "Location is required"),
-  date: z.string(),
   designStandard: z.enum(["ASCE7-16", "ASCE7-22"]),
   designMethod: z.enum(["LRFD", "ASD"]),
 });
@@ -36,7 +35,7 @@ export default function ProjectInfo() {
   return (
     <div className="p-8 max-w-4xl mx-auto">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold tracking-tight text-primary">Project Configuration</h1>
+        <h1 className="text-3xl font-bold tracking-tight text-primary">Project Information</h1>
         <p className="text-muted-foreground mt-2">Enter the general information for this structural analysis project.</p>
       </div>
 
@@ -96,19 +95,6 @@ export default function ProjectInfo() {
                       <FormLabel>Site Location</FormLabel>
                       <FormControl>
                         <Input {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="date"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Date</FormLabel>
-                      <FormControl>
-                        <Input type="date" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
