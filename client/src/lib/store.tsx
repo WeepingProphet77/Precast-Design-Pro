@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
-import { ProjectData, createDefaultProject, Panel, ConnectionNode, ProjectInfo, ConnectionCapacity } from "./types";
+import { ProjectData, createDefaultProject, Panel, ConnectionNode, ProjectInfo, ConnectionCapacity, DimensionAnnotation } from "./types";
 
 const CACHE_KEY = "precastpro_project_cache";
 const FILENAME_KEY = "precastpro_current_filename";
@@ -63,6 +63,9 @@ interface ProjectContextType {
   updateConnection: (panelId: string, connection: ConnectionNode) => void;
   addConnection: (panelId: string, connection: ConnectionNode) => void;
   deleteConnection: (panelId: string, connectionId: string) => void;
+  addDimension: (panelId: string, dimension: DimensionAnnotation) => void;
+  updateDimension: (panelId: string, dimension: DimensionAnnotation) => void;
+  deleteDimension: (panelId: string, dimensionId: string) => void;
   updateCapacity: (capacity: ConnectionCapacity, oldType?: string) => void;
   addCapacity: (capacity: ConnectionCapacity) => void;
   deleteCapacity: (type: string) => void;
@@ -124,6 +127,7 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
       openings: [],
       sketchLines: [],
       connections: [],
+      dimensions: [],
     };
     setProject((prev) => ({ ...prev, panels: [...prev.panels, newPanel] }));
   };
@@ -169,6 +173,42 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
         return {
           ...p,
           connections: p.connections.filter((c) => c.id !== connectionId),
+        };
+      }),
+    }));
+  };
+
+  const addDimension = (panelId: string, dimension: DimensionAnnotation) => {
+    setProject((prev) => ({
+      ...prev,
+      panels: prev.panels.map((p) => {
+        if (p.id !== panelId) return p;
+        return { ...p, dimensions: [...(p.dimensions || []), dimension] };
+      }),
+    }));
+  };
+
+  const updateDimension = (panelId: string, dimension: DimensionAnnotation) => {
+    setProject((prev) => ({
+      ...prev,
+      panels: prev.panels.map((p) => {
+        if (p.id !== panelId) return p;
+        return {
+          ...p,
+          dimensions: (p.dimensions || []).map((d) => (d.id === dimension.id ? dimension : d)),
+        };
+      }),
+    }));
+  };
+
+  const deleteDimension = (panelId: string, dimensionId: string) => {
+    setProject((prev) => ({
+      ...prev,
+      panels: prev.panels.map((p) => {
+        if (p.id !== panelId) return p;
+        return {
+          ...p,
+          dimensions: (p.dimensions || []).filter((d) => d.id !== dimensionId),
         };
       }),
     }));
@@ -333,6 +373,9 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
         updateConnection,
         addConnection,
         deleteConnection,
+        addDimension,
+        updateDimension,
+        deleteDimension,
         updateCapacity,
         addCapacity,
         deleteCapacity,

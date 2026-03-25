@@ -88,6 +88,7 @@ export interface Panel {
   openings: Opening[];
   sketchLines: SketchLine[];
   connections: ConnectionNode[];
+  dimensions?: DimensionAnnotation[];
   importedNodes?: { x: number; y: number }[];
   dxfViews?: DxfView[];
 }
@@ -98,6 +99,25 @@ export interface SketchLine {
   y1: number;
   x2: number;
   y2: number;
+}
+
+export type DimensionSnapRef =
+  | { kind: "vertex"; vertexId: string }
+  | { kind: "connection"; connectionId: string }
+  | { kind: "centroid" }
+  | { kind: "viewCentroid"; viewId: string }
+  | { kind: "dimension"; dimensionId: string; endpoint: "start" | "end" }
+  | { kind: "free" };
+
+export interface DimensionAnnotation {
+  id: string;
+  startX: number;
+  startY: number;
+  startRef: DimensionSnapRef;
+  endX: number;
+  endY: number;
+  endRef: DimensionSnapRef;
+  offset: number; // perpendicular offset for dimension line placement
 }
 
 export interface ConnectionCapacity {
