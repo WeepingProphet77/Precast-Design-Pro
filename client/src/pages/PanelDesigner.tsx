@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 
-type SelectionType = { kind: "connection"; id: string } | { kind: "centroid" } | null;
+type SelectionType = { kind: "connection"; id: string } | { kind: "centroid" } | { kind: "viewCentroid"; viewId: string } | null;
 
 export default function PanelDesigner() {
   const { project, updatePanel, addPanel, deletePanel, updateConnection, addConnection, deleteConnection } = useProject();
@@ -735,6 +735,53 @@ export default function PanelDesigner() {
                     return null;
                   })}
 
+                  {hasDxfViews && activePanel.dxfViews!.map((view, viewIdx) => {
+                    if (!view.showCentroid) return null;
+                    const computedAvgX = view.polygon.reduce((s, v) => s + v.x, 0) / view.polygon.length;
+                    const computedAvgY = view.polygon.reduce((s, v) => s + v.y, 0) / view.polygon.length;
+                    const cgX = view.centroidX ?? computedAvgX;
+                    const cgY = view.centroidY ?? computedAvgY;
+                    const s = screenFromCad(cgX, cgY);
+                    const isViewCgSelected = selection?.kind === "viewCentroid" && selection.viewId === view.id;
+                    const baseColor = viewIdx === 0 ? "#7c3aed" : viewIdx === 1 ? "#15803d" : viewIdx === 2 ? "#854d0e" : "#7c3aed";
+                    const color = isViewCgSelected ? "#dc2626" : baseColor;
+                    return (
+                      <Group
+                        key={`cg-${view.id}`}
+                        x={s.x}
+                        y={s.y}
+                        draggable
+                        onDragEnd={(e) => {
+                          const newScreenX = e.target.x();
+                          const newScreenY = e.target.y();
+                          const newCad = cadFromScreen(newScreenX, newScreenY);
+                          const updatedViews = activePanel.dxfViews!.map(v =>
+                            v.id === view.id ? { ...v, centroidX: Math.round(newCad.x * 100) / 100, centroidY: Math.round(newCad.y * 100) / 100 } : v
+                          );
+                          updatePanel({ ...activePanel, dxfViews: updatedViews });
+                          e.target.position({ x: newScreenX, y: newScreenY });
+                        }}
+                        onClick={(e) => {
+                          e.cancelBubble = true;
+                          setSelection({ kind: "viewCentroid", viewId: view.id });
+                        }}
+                        onMouseEnter={(e) => {
+                          const container = e.target.getStage()?.container();
+                          if (container) container.style.cursor = "pointer";
+                        }}
+                        onMouseLeave={(e) => {
+                          const container = e.target.getStage()?.container();
+                          if (container) container.style.cursor = tool === "connection" ? "crosshair" : "default";
+                        }}
+                      >
+                        <Circle radius={10} stroke={color} strokeWidth={isViewCgSelected ? 2.5 : 1.5} fill={isViewCgSelected ? "rgba(124, 58, 237, 0.1)" : "transparent"} />
+                        <Line points={[-10, 0, 10, 0]} stroke={color} strokeWidth={isViewCgSelected ? 2 : 1.5} />
+                        <Line points={[0, -10, 0, 10]} stroke={color} strokeWidth={isViewCgSelected ? 2 : 1.5} />
+                        <Text text="CG" x={12} y={-6} fontSize={10} fontStyle="bold" fill={color} />
+                      </Group>
+                    );
+                  })}
+
                   {activePanel.sketchLines?.map(l => {
                     const s1 = screenFromCad(l.x1, l.y1);
                     const s2 = screenFromCad(l.x2, l.y2);
@@ -773,7 +820,7 @@ export default function PanelDesigner() {
                     );
                   })}
 
-                  {centroidPos && hasGeometry && (() => {
+                  {centroidPos && hasGeometry && !hasDxfViews && (() => {
                     const s = screenFromCad(centroidPos.x, centroidPos.y);
                     const cgColor = isCentroidSelected ? "#dc2626" : centroidHovered ? "#a855f7" : "#7c3aed";
                     const cgStrokeWidth = isCentroidSelected || centroidHovered ? 2.5 : 2;
@@ -872,6 +919,8 @@ export default function PanelDesigner() {
             <ConnectionProperties panelId={activePanel.id} connectionId={selection.id} onDeselect={() => setSelection(null)} />
           ) : selection?.kind === "centroid" ? (
             <CentroidProperties panel={activePanel} computedCentroid={computedCentroid} onDeselect={() => setSelection(null)} />
+          ) : selection?.kind === "viewCentroid" ? (
+            <ViewCentroidProperties panel={activePanel} viewId={selection.viewId} onDeselect={() => setSelection(null)} />
           ) : (
             <PanelProperties panel={activePanel} />
           )}
@@ -946,18 +995,16 @@ function PanelProperties({ panel }: { panel: Panel }) {
                           onClick={() => {
                             const turningOn = !view.showCentroid;
                             const updatedViews = panel.dxfViews!.map((v, i) =>
-                              i === idx ? { ...v, showCentroid: !v.showCentroid } : v
+                              i === idx
+                                ? {
+                                    ...v,
+                                    showCentroid: !v.showCentroid,
+                                    // Clear manual override when toggling on, resetting to computed
+                                    ...(turningOn ? { centroidX: undefined, centroidY: undefined } : {}),
+                                  }
+                                : v
                             );
-                            if (turningOn) {
-                              // Reset panel CG to computed position, clearing manual override
-                              const perimPts = panel.perimeter;
-                              const centroid = perimPts.length >= 3
-                                ? calculateCentroid(perimPts, panel.openings)
-                                : { x: panel.width / 2, y: panel.height / 2 };
-                              updatePanel({ ...panel, dxfViews: updatedViews, centroidX: centroid.x, centroidY: centroid.y });
-                            } else {
-                              updatePanel({ ...panel, dxfViews: updatedViews });
-                            }
+                            updatePanel({ ...panel, dxfViews: updatedViews });
                           }}
                           data-testid={`button-centroid-toggle-${view.id}`}
                         >
@@ -1091,6 +1138,72 @@ function CentroidProperties({ panel, computedCentroid, onDeselect }: { panel: Pa
           </Button>
         </div>
       )}
+    </div>
+  );
+}
+
+function ViewCentroidProperties({ panel, viewId, onDeselect }: { panel: Panel; viewId: string; onDeselect: () => void }) {
+  const { updatePanel } = useProject();
+  const view = panel.dxfViews?.find(v => v.id === viewId);
+  if (!view) return null;
+
+  const computedX = view.polygon.reduce((s, v) => s + v.x, 0) / view.polygon.length;
+  const computedY = view.polygon.reduce((s, v) => s + v.y, 0) / view.polygon.length;
+  const cx = view.centroidX ?? computedX;
+  const cy = view.centroidY ?? computedY;
+
+  const resetToComputed = () => {
+    const updatedViews = panel.dxfViews!.map(v =>
+      v.id === viewId ? { ...v, centroidX: undefined, centroidY: undefined } : v
+    );
+    updatePanel({ ...panel, dxfViews: updatedViews });
+  };
+
+  const updateViewCentroid = (field: "centroidX" | "centroidY", value: number) => {
+    const updatedViews = panel.dxfViews!.map(v =>
+      v.id === viewId ? { ...v, [field]: value } : v
+    );
+    updatePanel({ ...panel, dxfViews: updatedViews });
+  };
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex justify-between items-center">
+        <h3 className="font-bold text-sm text-primary" data-testid="text-view-centroid-title">CG — {view.name}</h3>
+        <Button variant="ghost" size="sm" onClick={onDeselect} data-testid="button-deselect-view-centroid">
+          <MousePointer2 className="w-4 h-4" />
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1">
+          <Label className="text-[10px] uppercase">X (in)</Label>
+          <Input
+            type="number"
+            value={cx}
+            onChange={e => updateViewCentroid("centroidX", Number(e.target.value))}
+            className="h-8 text-xs font-mono"
+            data-testid="input-view-centroid-x"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-[10px] uppercase">Y (in)</Label>
+          <Input
+            type="number"
+            value={cy}
+            onChange={e => updateViewCentroid("centroidY", Number(e.target.value))}
+            className="h-8 text-xs font-mono"
+            data-testid="input-view-centroid-y"
+          />
+        </div>
+      </div>
+
+      <div className="text-xs text-muted-foreground space-y-2">
+        <p>Computed centroid: ({computedX.toFixed(2)}, {computedY.toFixed(2)})</p>
+        <Button variant="outline" size="sm" onClick={resetToComputed} className="w-full" data-testid="button-reset-view-centroid">
+          <RotateCcw className="w-3 h-3 mr-1" /> Reset to Computed
+        </Button>
+      </div>
     </div>
   );
 }
