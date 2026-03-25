@@ -13,11 +13,8 @@ function loadCachedProject(): ProjectData | null {
     if (data.info && data.panels && data.capacities) {
       if (!data.info.designStandard) data.info.designStandard = "ASCE7-16";
       if (!data.info.designMethod) data.info.designMethod = "LRFD";
-      // Ensure backward compat: add name field if missing
-      data.capacities = data.capacities.map(c => ({
-        ...c,
-        name: c.name || c.type,
-      }));
+      // Strip legacy name field if present
+      data.capacities = data.capacities.map(({ name, ...rest }: any) => rest);
       return data;
     }
   } catch {
@@ -294,11 +291,8 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
         if (!data.info.designStandard) data.info.designStandard = "ASCE7-16";
         if (!data.info.designMethod) data.info.designMethod = "LRFD";
-        // Ensure backward compat: add name field if missing
-        data.capacities = data.capacities.map(c => ({
-          ...c,
-          name: c.name || c.type,
-        }));
+        // Strip legacy name field if present
+        data.capacities = data.capacities.map(({ name, ...rest }: any) => rest);
         setProject(data);
         saveToBrowserCache(data);
         const openedName = file.name;
