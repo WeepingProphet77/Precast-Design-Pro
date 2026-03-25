@@ -65,6 +65,8 @@ export interface DxfView {
   polygon: Vertex[];
   openings: Opening[];
   showCentroid: boolean;
+  centroidX?: number;
+  centroidY?: number;
 }
 
 export interface Panel {
