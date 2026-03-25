@@ -448,7 +448,7 @@ export default function PanelDesigner() {
       <div className="flex-1 flex items-center justify-center bg-slate-100" data-testid="empty-state">
         <div className="text-center space-y-4">
           <p className="text-muted-foreground">No panels yet. Create one to get started.</p>
-          <Button onClick={addPanel} data-testid="button-create-panel"><Plus className="w-4 h-4 mr-2" /> Create Panel</Button>
+          <Button onClick={() => { const id = addPanel(); setActivePanelId(id); }} data-testid="button-create-panel"><Plus className="w-4 h-4 mr-2" /> Create Panel</Button>
         </div>
       </div>
     );
@@ -545,7 +545,7 @@ export default function PanelDesigner() {
               ))}
             </SelectContent>
           </Select>
-          <Button variant="outline" size="sm" onClick={addPanel} className="h-9" data-testid="button-new-panel">
+          <Button variant="outline" size="sm" onClick={() => { const id = addPanel(); setActivePanelId(id); }} className="h-9" data-testid="button-new-panel">
             <Plus className="w-4 h-4 mr-1" /> New
           </Button>
           <AlertDialog>
@@ -1249,6 +1249,8 @@ export default function PanelDesigner() {
 
 function PanelProperties({ panel }: { panel: Panel }) {
   const { updatePanel } = useProject();
+  const [editingViewId, setEditingViewId] = useState<string | null>(null);
+  const [editingViewName, setEditingViewName] = useState("");
 
   const updateField = (field: keyof Panel, value: number) => {
     updatePanel({ ...panel, [field]: value });
@@ -1269,24 +1271,6 @@ function PanelProperties({ panel }: { panel: Panel }) {
                 data-testid="input-panel-name"
               />
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <Label className="text-[10px] uppercase">Nominal Thickness (in)</Label>
-                <Input
-                  type="number"
-                  value={panel.thickness}
-                  onChange={e => updateField("thickness", Number(e.target.value))}
-                  className="h-8 text-xs font-mono"
-                  data-testid="input-panel-thickness"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-[10px] uppercase">Dimensions</Label>
-                <div className="h-8 flex items-center text-xs font-mono text-muted-foreground">
-                  {panel.width.toFixed(1)}" × {panel.height.toFixed(1)}"
-                </div>
-              </div>
-            </div>
           </div>
         </div>
 
@@ -1303,7 +1287,35 @@ function PanelProperties({ panel }: { panel: Panel }) {
                     : "bg-purple-100 border-purple-300 text-purple-800";
                   return (
                     <div key={view.id} className={`flex items-center justify-between rounded px-2 py-1.5 border text-[11px] font-medium ${colorClass}`} data-testid={`view-item-${view.id}`}>
-                      <span>{view.name}</span>
+                      {editingViewId === view.id ? (
+                        <input
+                          autoFocus
+                          className="bg-white/80 border border-current rounded px-1 py-0.5 text-[11px] font-medium w-24 outline-none"
+                          value={editingViewName}
+                          onChange={e => setEditingViewName(e.target.value)}
+                          onBlur={() => {
+                            if (editingViewName.trim()) {
+                              const updatedViews = panel.dxfViews!.map(v =>
+                                v.id === view.id ? { ...v, name: editingViewName.trim() } : v
+                              );
+                              updatePanel({ ...panel, dxfViews: updatedViews });
+                            }
+                            setEditingViewId(null);
+                          }}
+                          onKeyDown={e => {
+                            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                            if (e.key === "Escape") setEditingViewId(null);
+                          }}
+                          data-testid={`input-view-name-${view.id}`}
+                        />
+                      ) : (
+                        <span
+                          className="cursor-pointer hover:underline"
+                          title="Click to rename"
+                          onClick={() => { setEditingViewId(view.id); setEditingViewName(view.name); }}
+                          data-testid={`view-name-${view.id}`}
+                        >{view.name}</span>
+                      )}
                       <div className="flex items-center gap-2">
                         <span className="text-[10px] opacity-70">{view.openings.length} opening{view.openings.length !== 1 ? "s" : ""}</span>
                         <button

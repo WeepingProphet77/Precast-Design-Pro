@@ -504,8 +504,10 @@ export function parseDxfFile(content: string): DxfParseResult {
     return { points: pts, closed: s.closed };
   });
 
-  const allLineSegments = [...lineSegments, ...arcLineSegments, ...ellipseLineSegments];
-  const linePolylines = tryBuildPolylinesFromLines(allLineSegments);
+  // Arc and ellipse segments form polylines (they contribute to shapes/CG).
+  // LINE entities are kept as display-only sketch lines — they don't form closed shapes.
+  const curveLineSegments = [...arcLineSegments, ...ellipseLineSegments];
+  const linePolylines = tryBuildPolylinesFromLines(curveLineSegments);
   const allPolylines = [...polylines, ...linePolylines, ...splinePolylines];
 
   const closedPolylines = allPolylines.filter(p => p.closed && p.points.length >= 3);
@@ -531,6 +533,13 @@ export function parseDxfFile(content: string): DxfParseResult {
       maxX = Math.max(maxX, p.x);
       maxY = Math.max(maxY, p.y);
     }
+  }
+  // Include LINE entity bounds so they aren't clipped
+  for (const seg of lineSegments) {
+    minX = Math.min(minX, seg.x1, seg.x2);
+    minY = Math.min(minY, seg.y1, seg.y2);
+    maxX = Math.max(maxX, seg.x1, seg.x2);
+    maxY = Math.max(maxY, seg.y1, seg.y2);
   }
   if (!isFinite(minX)) { minX = 0; minY = 0; maxX = 120; maxY = 180; }
 
@@ -583,6 +592,16 @@ export function parseDxfFile(content: string): DxfParseResult {
         y2: round3(ol.points[k + 1].y - minY),
       });
     }
+  }
+
+  // LINE entities are display-only sketch lines (no CG / fill contribution)
+  for (const seg of lineSegments) {
+    sketchLines.push({
+      x1: round3(seg.x1 - minX),
+      y1: round3(seg.y1 - minY),
+      x2: round3(seg.x2 - minX),
+      y2: round3(seg.y2 - minY),
+    });
   }
 
   const nodes = points.map(p => ({ x: round3(p.x - minX), y: round3(p.y - minY) }));

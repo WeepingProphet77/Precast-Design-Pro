@@ -58,7 +58,7 @@ interface ProjectContextType {
   updateProjectInfo: (info: ProjectInfo) => void;
   setProjectData: (data: ProjectData) => void;
   updatePanel: (panel: Panel) => void;
-  addPanel: () => void;
+  addPanel: () => string;
   deletePanel: (id: string) => void;
   updateConnection: (panelId: string, connection: ConnectionNode) => void;
   addConnection: (panelId: string, connection: ConnectionNode) => void;
@@ -111,7 +111,7 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }));
   };
 
-  const addPanel = () => {
+  const addPanel = (): string => {
     const newPanel: Panel = {
       id: crypto.randomUUID(),
       name: `P-0${project.panels.length + 1}`,
@@ -130,6 +130,7 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
       dimensions: [],
     };
     setProject((prev) => ({ ...prev, panels: [...prev.panels, newPanel] }));
+    return newPanel.id;
   };
 
   const deletePanel = (id: string) => {
