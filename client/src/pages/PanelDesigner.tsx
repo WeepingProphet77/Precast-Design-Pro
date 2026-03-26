@@ -1457,8 +1457,8 @@ export default function PanelDesigner() {
                         }}
                       >
                         {renderConnectionMarker(c, isSelected)}
-                        <Text text={c.label} x={10} y={-14} fontSize={11} fontStyle="bold" fill="#1e293b" />
-                        <Text text={`(${c.x.toFixed(1)}, ${c.y.toFixed(1)})`} x={10} y={0} fontSize={9} fill="#64748b" />
+                        <Text text={c.label} x={10} y={-16} fontSize={14} fontStyle="bold" fill="#1e293b" />
+                        <Text text={`(${c.x.toFixed(1)}, ${c.y.toFixed(1)})`} x={10} y={2} fontSize={12} fill="#64748b" />
                       </Group>
                     );
                   })}
@@ -1643,7 +1643,7 @@ export default function PanelDesigner() {
                             <Line points={tailPoints} stroke={loadColor} strokeWidth={1.5} />
                           )}
                           {arrows}
-                          {ann.label && <Text text={ann.label} x={labelX} y={labelY - 6} fontSize={10} fill={loadColor} fontStyle="bold" />}
+                          {ann.label && <Text text={ann.label} x={labelX} y={labelY - 8} fontSize={14} fill={loadColor} fontStyle="bold" />}
                           {/* Invisible hit area along base line for click detection */}
                           <Line points={[s1.x, s1.y, s2.x, s2.y]} stroke="transparent" hitStrokeWidth={14} />
                           {isAnnSelected && (
@@ -1690,7 +1690,7 @@ export default function PanelDesigner() {
                         >
                           <Line points={[0, 0, 0, arrowSize * dir]} stroke={loadColor} strokeWidth={2.5} />
                           <Line points={[-6, arrowSize * dir - 8 * dir, 0, arrowSize * dir, 6, arrowSize * dir - 8 * dir]} stroke={loadColor} strokeWidth={2.5} />
-                          {ann.label && <Text text={ann.label} x={8} y={dir > 0 ? 4 : -14} fontSize={10} fill={loadColor} fontStyle="bold" />}
+                          {ann.label && <Text text={ann.label} x={8} y={dir > 0 ? 4 : -16} fontSize={14} fill={loadColor} fontStyle="bold" />}
                         </Group>
                       );
                     }
@@ -1725,7 +1725,7 @@ export default function PanelDesigner() {
                         >
                           <Line points={[0, 0, arrowSize * dir, 0]} stroke={loadColor} strokeWidth={2.5} />
                           <Line points={[arrowSize * dir - 8 * dir, -6, arrowSize * dir, 0, arrowSize * dir - 8 * dir, 6]} stroke={loadColor} strokeWidth={2.5} />
-                          {ann.label && <Text text={ann.label} x={dir > 0 ? arrowSize + 4 : -arrowSize - 30} y={-14} fontSize={10} fill={loadColor} fontStyle="bold" />}
+                          {ann.label && <Text text={ann.label} x={dir > 0 ? arrowSize + 4 : -arrowSize - 40} y={-16} fontSize={14} fill={loadColor} fontStyle="bold" />}
                         </Group>
                       );
                     }
@@ -1771,7 +1771,7 @@ export default function PanelDesigner() {
                             tipX, tipY,
                             tipX - sign * (zDirX * 8 - zDirY * 4), tipY - sign * (zDirY * 8 + zDirX * 4),
                           ]} stroke={loadColor} strokeWidth={2.5} />
-                          {ann.label && <Text text={ann.label} x={tipX + 6} y={tipY - 6} fontSize={10} fill={loadColor} fontStyle="bold" />}
+                          {ann.label && <Text text={ann.label} x={tipX + 8} y={tipY - 8} fontSize={14} fill={loadColor} fontStyle="bold" />}
                         </Group>
                       );
                     }
@@ -1796,7 +1796,6 @@ export default function PanelDesigner() {
                           const newCadY = rawCad.y - ta.height; // bottom-left Y
                           const dxm = rawCad.x - ta.x;
                           const dym = newCadY - ta.y;
-                          // For textbox, allow free movement (not orthographic) but snap to 0.5"
                           const snX = ta.x + Math.round(dxm / 0.5) * 0.5;
                           const snY = ta.y + Math.round(dym / 0.5) * 0.5;
                           const snTl = screenFromCad(snX, snY + ta.height);
@@ -1828,31 +1827,27 @@ export default function PanelDesigner() {
                         {/* Text with word wrap */}
                         <Text
                           text={ta.text}
-                          x={3} y={3}
-                          width={sw - 6}
-                          height={sh - 6}
-                          fontSize={10}
+                          x={4} y={3}
+                          width={sw - 8}
+                          fontSize={14}
                           fill="#1e293b"
                           wrap="word"
-                          ellipsis={true}
                         />
-                        {/* Resize handle (bottom-right corner in screen = CAD bottom-right) */}
+                        {/* Resize handle — only updates on drag end to avoid compounding */}
                         {isTaSelected && (
                           <Rect
-                            x={sw - 8} y={sh - 8}
-                            width={8} height={8}
+                            x={sw - 10} y={sh - 10}
+                            width={10} height={10}
                             fill="#dc2626" opacity={0.7}
                             draggable
-                            onDragMove={(e) => {
-                              // Compute new width/height from drag
-                              const newSw = Math.max(20, sw - 8 + e.target.x() + 4);
-                              const newSh = Math.max(20, sh - 8 + e.target.y() + 4);
-                              const newW = Math.round((newSw / scale) / 0.5) * 0.5;
-                              const newH = Math.round((newSh / scale) / 0.5) * 0.5;
-                              updateTextAnnotation(activePanel.id, { ...ta, width: Math.max(6, newW), height: Math.max(6, newH) });
-                              e.target.position({ x: 0, y: 0 }); // reset; parent re-renders
+                            onDragEnd={(e) => {
+                              const deltaScreenX = e.target.x();
+                              const deltaScreenY = e.target.y();
+                              const newW = Math.max(6, Math.round(((sw + deltaScreenX) / scale) / 0.5) * 0.5);
+                              const newH = Math.max(6, Math.round(((sh + deltaScreenY) / scale) / 0.5) * 0.5);
+                              updateTextAnnotation(activePanel.id, { ...ta, width: newW, height: newH });
+                              e.target.position({ x: 0, y: 0 });
                             }}
-                            onDragEnd={(e) => { e.target.position({ x: 0, y: 0 }); }}
                           />
                         )}
                       </Group>
@@ -1907,9 +1902,9 @@ export default function PanelDesigner() {
                           text={textStr}
                           x={mx}
                           y={my}
-                          offsetX={textStr.length * 3}
-                          offsetY={12}
-                          fontSize={11}
+                          offsetX={textStr.length * 3.5}
+                          offsetY={14}
+                          fontSize={14}
                           fontStyle="bold"
                           fill={dimColor}
                           rotation={textAngle}
@@ -1947,7 +1942,7 @@ export default function PanelDesigner() {
                         <Line points={[d1x, d1y, d2x, d2y]} stroke="#0369a1" strokeWidth={1.2} dash={[4, 4]} opacity={0.5} />
                         <Line points={[d1x - nx * 4, d1y - ny * 4, d1x + nx * 4, d1y + ny * 4]} stroke="#0369a1" strokeWidth={1.5} opacity={0.5} />
                         <Line points={[d2x - nx * 4, d2y - ny * 4, d2x + nx * 4, d2y + ny * 4]} stroke="#0369a1" strokeWidth={1.5} opacity={0.5} />
-                        <Text text={textStr} x={mx} y={my} offsetX={textStr.length * 3} offsetY={12} fontSize={11} fontStyle="bold" fill="#0369a1" opacity={0.6} rotation={textAngle} />
+                        <Text text={textStr} x={mx} y={my} offsetX={textStr.length * 3.5} offsetY={14} fontSize={14} fontStyle="bold" fill="#0369a1" opacity={0.6} rotation={textAngle} />
                         {/* Start point indicator */}
                         <Circle x={s1.x} y={s1.y} radius={4} fill="#0369a1" opacity={0.6} />
                       </Group>
@@ -1974,7 +1969,7 @@ export default function PanelDesigner() {
                         <Circle x={s1.x} y={s1.y} radius={4} fill="#334155" opacity={0.6} />
                         {/* Temporary dimension */}
                         <Line points={[s1.x, s1.y, s2.x, s2.y]} stroke="#f59e0b" strokeWidth={1} dash={[6, 4]} opacity={0.5} />
-                        <Text text={textStr} x={mx + 6} y={my - 14} fontSize={11} fontStyle="bold" fill="#f59e0b" opacity={0.7} />
+                        <Text text={textStr} x={mx + 6} y={my - 14} fontSize={14} fontStyle="bold" fill="#f59e0b" opacity={0.7} />
                       </Group>
                     );
                   })()}
@@ -1991,7 +1986,7 @@ export default function PanelDesigner() {
                       <Group>
                         <Line points={[s1.x, s1.y, s2.x, s2.y]} stroke="#b91c1c" strokeWidth={2} opacity={0.5} />
                         <Circle x={s1.x} y={s1.y} radius={4} fill="#b91c1c" opacity={0.6} />
-                        <Text text={textStr} x={mx + 6} y={my - 14} fontSize={11} fontStyle="bold" fill="#f59e0b" opacity={0.7} />
+                        <Text text={textStr} x={mx + 6} y={my - 14} fontSize={14} fontStyle="bold" fill="#f59e0b" opacity={0.7} />
                       </Group>
                     );
                   })()}
@@ -2012,7 +2007,7 @@ export default function PanelDesigner() {
                         <Line points={[s1.x, s1.y, s2.x, s2.y]} stroke="#f59e0b" strokeWidth={1.5} dash={[6, 4]} />
                         <Circle x={s1.x} y={s1.y} radius={3} fill="#f59e0b" opacity={0.7} />
                         <Circle x={s2.x} y={s2.y} radius={3} fill="#f59e0b" opacity={0.7} />
-                        <Text text={textStr} x={mx + textOffX} y={my + textOffY} fontSize={11} fontStyle="bold" fill="#f59e0b" />
+                        <Text text={textStr} x={mx + textOffX} y={my + textOffY} fontSize={14} fontStyle="bold" fill="#f59e0b" />
                       </Group>
                     );
                   })()}
@@ -2593,7 +2588,17 @@ function TextAnnotationProperties({ panelId, annotationId, onDeselect }: { panel
         <Label className="text-[10px] uppercase">Text</Label>
         <textarea
           value={ta.text}
-          onChange={e => updateTextAnnotation(panelId, { ...ta, text: e.target.value })}
+          onChange={e => {
+            const newText = e.target.value;
+            // Auto-grow height: estimate lines needed at ~14px font, ~7px per char
+            const charsPerLine = Math.max(1, Math.floor((ta.width * 7) / 7));
+            const lines = newText.split('\n').reduce((total, line) => {
+              return total + Math.max(1, Math.ceil((line.length || 1) / charsPerLine));
+            }, 0);
+            const neededHeight = Math.max(12, Math.ceil((lines * 2.5) / 0.5) * 0.5);
+            const newHeight = Math.max(ta.height, neededHeight);
+            updateTextAnnotation(panelId, { ...ta, text: newText, height: newHeight });
+          }}
           placeholder="Enter text..."
           className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-xs ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 min-h-[80px] resize-y"
           data-testid="input-text-content"
