@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
-import { ProjectData, createDefaultProject, Panel, ConnectionNode, ProjectInfo, ConnectionCapacity, DimensionAnnotation, UserDrawnLine, LoadAnnotation } from "./types";
+import { ProjectData, createDefaultProject, Panel, ConnectionNode, ProjectInfo, ConnectionCapacity, DimensionAnnotation, UserDrawnLine, LoadAnnotation, TextAnnotation } from "./types";
 
 const CACHE_KEY = "precastpro_project_cache";
 const FILENAME_KEY = "precastpro_current_filename";
@@ -72,6 +72,9 @@ interface ProjectContextType {
   addLoadAnnotation: (panelId: string, annotation: LoadAnnotation) => void;
   updateLoadAnnotation: (panelId: string, annotation: LoadAnnotation) => void;
   deleteLoadAnnotation: (panelId: string, annotationId: string) => void;
+  addTextAnnotation: (panelId: string, annotation: TextAnnotation) => void;
+  updateTextAnnotation: (panelId: string, annotation: TextAnnotation) => void;
+  deleteTextAnnotation: (panelId: string, annotationId: string) => void;
   updateCapacity: (capacity: ConnectionCapacity, oldType?: string) => void;
   addCapacity: (capacity: ConnectionCapacity) => void;
   deleteCapacity: (type: string) => void;
@@ -136,6 +139,7 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
       dimensions: [],
       userLines: [],
       loadAnnotations: [],
+      textAnnotations: [],
     };
     setProject((prev) => ({ ...prev, panels: [...prev.panels, newPanel] }));
     return newPanel.id;
@@ -279,6 +283,36 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
       panels: prev.panels.map((p) => {
         if (p.id !== panelId) return p;
         return { ...p, loadAnnotations: (p.loadAnnotations || []).filter((a) => a.id !== annotationId) };
+      }),
+    }));
+  };
+
+  const addTextAnnotation = (panelId: string, annotation: TextAnnotation) => {
+    setProject((prev) => ({
+      ...prev,
+      panels: prev.panels.map((p) => {
+        if (p.id !== panelId) return p;
+        return { ...p, textAnnotations: [...(p.textAnnotations || []), annotation] };
+      }),
+    }));
+  };
+
+  const updateTextAnnotation = (panelId: string, annotation: TextAnnotation) => {
+    setProject((prev) => ({
+      ...prev,
+      panels: prev.panels.map((p) => {
+        if (p.id !== panelId) return p;
+        return { ...p, textAnnotations: (p.textAnnotations || []).map((t) => (t.id === annotation.id ? annotation : t)) };
+      }),
+    }));
+  };
+
+  const deleteTextAnnotation = (panelId: string, annotationId: string) => {
+    setProject((prev) => ({
+      ...prev,
+      panels: prev.panels.map((p) => {
+        if (p.id !== panelId) return p;
+        return { ...p, textAnnotations: (p.textAnnotations || []).filter((t) => t.id !== annotationId) };
       }),
     }));
   };
@@ -451,6 +485,9 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
         addLoadAnnotation,
         updateLoadAnnotation,
         deleteLoadAnnotation,
+        addTextAnnotation,
+        updateTextAnnotation,
+        deleteTextAnnotation,
         updateCapacity,
         addCapacity,
         deleteCapacity,

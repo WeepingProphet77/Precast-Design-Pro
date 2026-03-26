@@ -1,7 +1,7 @@
 
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { ProjectData, Panel, ConnectionNode, DimensionAnnotation, UserDrawnLine, LoadAnnotation } from "./types";
+import { ProjectData, Panel, ConnectionNode, DimensionAnnotation, UserDrawnLine, LoadAnnotation, TextAnnotation } from "./types";
 import { calculateLoadCombinations } from "./calculations";
 
 const MARGIN = 20;
@@ -105,10 +105,10 @@ function generateProjectDataSheet(doc: jsPDF, project: ProjectData) {
     autoTable(doc, {
       startY: y,
       margin: { left: MARGIN, right: MARGIN },
-      head: [["Panel", "Size (W x H x T)", "Connections", "Description"]],
+      head: [["Panel", "Thickness", "Connections", "Description"]],
       body: project.panels.map(p => [
         p.name,
-        `${p.width}" × ${p.height}" × ${p.thickness}"`,
+        `${p.thickness}"`,
         String(p.connections.length),
         p.description || "—",
       ]),
@@ -404,6 +404,39 @@ function drawLoadAnnotationsOnPdf(
   });
 }
 
+function drawTextAnnotationsOnPdf(
+  doc: jsPDF,
+  annotations: TextAnnotation[],
+  ox: number, oy: number,
+  minX: number, minY: number,
+  pw: number, ph: number,
+  pdfScale: number
+) {
+  if (!annotations || annotations.length === 0) return;
+
+  annotations.forEach(ta => {
+    const px = ox + (ta.x - minX) * pdfScale;
+    // Top-left in PDF coords (Y flipped)
+    const py = oy + (ph - (ta.y + ta.height - minY)) * pdfScale;
+    const tw = ta.width * pdfScale;
+    const th = ta.height * pdfScale;
+
+    if (ta.showBorder) {
+      doc.setDrawColor(100, 116, 139); // slate-500
+      doc.setLineWidth(0.3);
+      doc.rect(px, py, tw, th, "S");
+    }
+
+    if (ta.text) {
+      doc.setFontSize(5);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(30, 41, 59); // slate-800
+      const lines = doc.splitTextToSize(ta.text, tw - 2);
+      doc.text(lines, px + 1, py + 4, { maxWidth: tw - 2 });
+    }
+  });
+}
+
 function drawPanelGeometry(doc: jsPDF, panel: Panel, x: number, y: number, maxW: number, maxH: number) {
   const hasDxfViews = panel.dxfViews && panel.dxfViews.length > 0;
 
@@ -529,6 +562,7 @@ function drawPanelGeometry(doc: jsPDF, panel: Panel, x: number, y: number, maxW:
     }
     drawUserLinesOnPdf(doc, panel.userLines || [], ox, oy, minX, minY, pw, ph, scale);
     drawLoadAnnotationsOnPdf(doc, panel.loadAnnotations || [], ox, oy, minX, minY, pw, ph, scale);
+    drawTextAnnotationsOnPdf(doc, panel.textAnnotations || [], ox, oy, minX, minY, pw, ph, scale);
     return;
   }
 
@@ -562,6 +596,7 @@ function drawPanelGeometry(doc: jsPDF, panel: Panel, x: number, y: number, maxW:
     }
     drawUserLinesOnPdf(doc, panel.userLines || [], ox, oy, 0, 0, pw, ph, scale);
     drawLoadAnnotationsOnPdf(doc, panel.loadAnnotations || [], ox, oy, 0, 0, pw, ph, scale);
+    drawTextAnnotationsOnPdf(doc, panel.textAnnotations || [], ox, oy, 0, 0, pw, ph, scale);
     return;
   }
 
@@ -659,6 +694,7 @@ function drawPanelGeometry(doc: jsPDF, panel: Panel, x: number, y: number, maxW:
   }
   drawUserLinesOnPdf(doc, panel.userLines || [], ox, oy, minX, minY, pw, ph, scale);
   drawLoadAnnotationsOnPdf(doc, panel.loadAnnotations || [], ox, oy, minX, minY, pw, ph, scale);
+  drawTextAnnotationsOnPdf(doc, panel.textAnnotations || [], ox, oy, minX, minY, pw, ph, scale);
 }
 
 function generatePanelPage(doc: jsPDF, project: ProjectData, panel: Panel) {
@@ -686,8 +722,6 @@ function generatePanelPage(doc: jsPDF, project: ProjectData, panel: Panel) {
   const col2X = PAGE_W / 2 + 10;
   const savedY = y;
 
-  y = drawKeyValue(doc, "Width:", `${panel.width}"`, col1X, y, 80);
-  y = drawKeyValue(doc, "Height:", `${panel.height}"`, col1X, y, 80);
   y = drawKeyValue(doc, "Thickness:", `${panel.thickness}"`, col1X, y, 80);
   y = drawKeyValue(doc, "Panel Weight:", `${panel.panelWeight || 0} lbs`, col1X, y, 80);
 

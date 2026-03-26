@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Stage, Layer, Rect, Circle, Text, Group, Line, Shape, RegularPolygon } from "react-konva";
 import { useProject } from "@/lib/store";
-import { Panel, ConnectionNode, ConnectionMarker, Vertex, Opening, DxfView, DimensionAnnotation, DimensionSnapRef, UserDrawnLine, LoadAnnotation, LoadAnnotationType } from "@/lib/types";
+import { Panel, ConnectionNode, ConnectionMarker, Vertex, Opening, DxfView, DimensionAnnotation, DimensionSnapRef, UserDrawnLine, LoadAnnotation, LoadAnnotationType, TextAnnotation } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,7 +14,7 @@ import {
   Plus, Trash2, ZoomIn, ZoomOut, MousePointer2, Upload, Square as SquareIcon,
   ArrowUpRight, Crosshair, RotateCcw, Ruler, Minus, MoreHorizontal,
   ArrowDown, ArrowUp, ArrowLeft, ArrowRight, Circle as CircleIcon,
-  MoveHorizontal, ChevronDown, Pencil
+  MoveHorizontal, ChevronDown, Pencil, Type
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
@@ -31,12 +31,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 
-type SelectionType = { kind: "connection"; id: string } | { kind: "centroid" } | { kind: "viewCentroid"; viewId: string } | { kind: "dimension"; id: string } | { kind: "userLine"; id: string } | { kind: "loadAnnotation"; id: string } | null;
+type SelectionType = { kind: "connection"; id: string } | { kind: "centroid" } | { kind: "viewCentroid"; viewId: string } | { kind: "dimension"; id: string } | { kind: "userLine"; id: string } | { kind: "loadAnnotation"; id: string } | { kind: "textAnnotation"; id: string } | null;
 
-type ToolType = "select" | "connection" | "dimension" | "line_solid" | "line_hidden" | "load_line" | "load_point_vertical" | "load_point_horizontal" | "load_point_oop";
+type ToolType = "select" | "connection" | "dimension" | "line_solid" | "line_hidden" | "load_line" | "load_point_vertical" | "load_point_horizontal" | "load_point_oop" | "textbox";
 
 export default function PanelDesigner() {
-  const { project, updatePanel, addPanel, deletePanel, updateConnection, addConnection, deleteConnection, addDimension, deleteDimension, addUserLine, updateUserLine, deleteUserLine, addLoadAnnotation, updateLoadAnnotation, deleteLoadAnnotation } = useProject();
+  const { project, updatePanel, addPanel, deletePanel, updateConnection, addConnection, deleteConnection, addDimension, updateDimension, deleteDimension, addUserLine, updateUserLine, deleteUserLine, addLoadAnnotation, updateLoadAnnotation, deleteLoadAnnotation, addTextAnnotation, updateTextAnnotation, deleteTextAnnotation } = useProject();
   const stageRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -570,6 +570,25 @@ export default function PanelDesigner() {
       setSelection({ kind: "loadAnnotation", id: annotation.id });
       return;
     }
+
+    if (tool === "textbox" && activePanel) {
+      const snap = snapToPoint(cad.x, cad.y);
+      const ptX = snap.snapped ? snap.x : Math.round(cad.x * 10) / 10;
+      const ptY = snap.snapped ? snap.y : Math.round(cad.y * 10) / 10;
+      const ta: TextAnnotation = {
+        id: crypto.randomUUID(),
+        x: ptX,
+        y: ptY,
+        width: 24,   // default 24" wide
+        height: 12,  // default 12" tall
+        text: "",
+        showBorder: true,
+      };
+      addTextAnnotation(activePanel.id, ta);
+      setSelection({ kind: "textAnnotation", id: ta.id });
+      setTool("select");
+      return;
+    }
   };
 
   const onWheel = (e: any) => {
@@ -658,6 +677,15 @@ export default function PanelDesigner() {
               startY: Math.round((dim.startY + dy) * 10) / 10,
               endX: Math.round((dim.endX + dx) * 10) / 10,
               endY: Math.round((dim.endY + dy) * 10) / 10,
+            });
+          }
+        } else if (sel.kind === "textAnnotation") {
+          const ta = panel.textAnnotations?.find(t => t.id === sel.id);
+          if (ta) {
+            updateTextAnnotation(panel.id, {
+              ...ta,
+              x: Math.round((ta.x + dx) * 10) / 10,
+              y: Math.round((ta.y + dy) * 10) / 10,
             });
           }
         }
@@ -986,6 +1014,19 @@ export default function PanelDesigner() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+
+          <Separator orientation="vertical" className="h-5 mx-0.5" />
+
+          {/* Textbox tool */}
+          <Button
+            variant={tool === "textbox" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setTool("textbox")}
+            className="h-9"
+            data-testid="button-tool-textbox"
+          >
+            <Type className="w-4 h-4 mr-1" /> Text
+          </Button>
         </div>
 
         <div className="flex-1" />
@@ -1047,6 +1088,12 @@ export default function PanelDesigner() {
           {(tool === "load_point_vertical" || tool === "load_point_horizontal" || tool === "load_point_oop") && (
             <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 bg-primary text-primary-foreground rounded-md px-4 py-1.5 shadow-sm text-xs font-medium">
               Click to place a {tool === "load_point_vertical" ? "vertical" : tool === "load_point_horizontal" ? "horizontal" : "out-of-plane"} point load. Press Escape to cancel.
+            </div>
+          )}
+
+          {tool === "textbox" && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 bg-primary text-primary-foreground rounded-md px-4 py-1.5 shadow-sm text-xs font-medium">
+              Click to place a text box. Press Escape to cancel.
             </div>
           )}
 
@@ -1732,6 +1779,86 @@ export default function PanelDesigner() {
                     return null;
                   })}
 
+                  {/* Text annotations */}
+                  {(activePanel.textAnnotations || []).map(ta => {
+                    const tl = screenFromCad(ta.x, ta.y + ta.height); // top-left in screen coords (CAD y is flipped)
+                    const sw = ta.width * scale;
+                    const sh = ta.height * scale;
+                    const isTaSelected = selection?.kind === "textAnnotation" && selection.id === ta.id;
+                    const borderColor = isTaSelected ? "#dc2626" : "#64748b";
+                    return (
+                      <Group key={ta.id} x={tl.x} y={tl.y} draggable
+                        onDragStart={() => {
+                          setDragState({ elementType: "loadAnnotation", elementId: ta.id, originalX: ta.x, originalY: ta.y, currentX: ta.x, currentY: ta.y, axis: null });
+                        }}
+                        onDragMove={(e) => {
+                          const rawCad = cadFromScreen(tl.x + e.target.x(), tl.y + e.target.y());
+                          const newCadY = rawCad.y - ta.height; // bottom-left Y
+                          const dxm = rawCad.x - ta.x;
+                          const dym = newCadY - ta.y;
+                          // For textbox, allow free movement (not orthographic) but snap to 0.5"
+                          const snX = ta.x + Math.round(dxm / 0.5) * 0.5;
+                          const snY = ta.y + Math.round(dym / 0.5) * 0.5;
+                          const snTl = screenFromCad(snX, snY + ta.height);
+                          e.target.position({ x: snTl.x - tl.x, y: snTl.y - tl.y });
+                          const axis: "h" | "v" = Math.abs(dxm) >= Math.abs(dym) ? "h" : "v";
+                          setDragState(prev => prev ? { ...prev, currentX: snX, currentY: snY, axis } : null);
+                        }}
+                        onDragEnd={(e) => {
+                          if (dragState) {
+                            updateTextAnnotation(activePanel.id, {
+                              ...ta,
+                              x: Math.round(dragState.currentX * 10) / 10,
+                              y: Math.round(dragState.currentY * 10) / 10,
+                            });
+                          }
+                          e.target.position({ x: 0, y: 0 });
+                          setDragState(null);
+                        }}
+                        onClick={(e) => { e.cancelBubble = true; setSelection({ kind: "textAnnotation", id: ta.id }); }}
+                      >
+                        {/* Background and border */}
+                        <Rect
+                          width={sw} height={sh}
+                          fill="rgba(255,255,255,0.85)"
+                          stroke={ta.showBorder || isTaSelected ? borderColor : "transparent"}
+                          strokeWidth={isTaSelected ? 2 : 1}
+                          dash={!ta.showBorder && isTaSelected ? [4, 3] : undefined}
+                        />
+                        {/* Text with word wrap */}
+                        <Text
+                          text={ta.text}
+                          x={3} y={3}
+                          width={sw - 6}
+                          height={sh - 6}
+                          fontSize={10}
+                          fill="#1e293b"
+                          wrap="word"
+                          ellipsis={true}
+                        />
+                        {/* Resize handle (bottom-right corner in screen = CAD bottom-right) */}
+                        {isTaSelected && (
+                          <Rect
+                            x={sw - 8} y={sh - 8}
+                            width={8} height={8}
+                            fill="#dc2626" opacity={0.7}
+                            draggable
+                            onDragMove={(e) => {
+                              // Compute new width/height from drag
+                              const newSw = Math.max(20, sw - 8 + e.target.x() + 4);
+                              const newSh = Math.max(20, sh - 8 + e.target.y() + 4);
+                              const newW = Math.round((newSw / scale) / 0.5) * 0.5;
+                              const newH = Math.round((newSh / scale) / 0.5) * 0.5;
+                              updateTextAnnotation(activePanel.id, { ...ta, width: Math.max(6, newW), height: Math.max(6, newH) });
+                              e.target.position({ x: 0, y: 0 }); // reset; parent re-renders
+                            }}
+                            onDragEnd={(e) => { e.target.position({ x: 0, y: 0 }); }}
+                          />
+                        )}
+                      </Group>
+                    );
+                  })}
+
                   {/* Permanent dimension annotations */}
                   {(activePanel.dimensions || []).map(dim => {
                     const s1 = screenFromCad(dim.startX, dim.startY);
@@ -1906,7 +2033,7 @@ export default function PanelDesigner() {
 
           <div className="absolute bottom-3 left-3 z-10 bg-background/90 backdrop-blur-sm border rounded-md px-3 py-1.5 shadow-sm text-xs text-muted-foreground" data-testid="text-panel-info">
             {hasGeometry
-              ? `${activePanel.name} — ${activePanel.width.toFixed(1)}" × ${activePanel.height.toFixed(1)}" — ${activePanel.connections.length} connections`
+              ? `${activePanel.name} — ${activePanel.connections.length} connection${activePanel.connections.length !== 1 ? "s" : ""}`
               : `${activePanel.name} — No geometry defined`
             }
           </div>
@@ -1926,6 +2053,8 @@ export default function PanelDesigner() {
             <UserLineProperties panelId={activePanel.id} lineId={selection.id} onDeselect={() => setSelection(null)} />
           ) : selection?.kind === "loadAnnotation" ? (
             <LoadAnnotationProperties panelId={activePanel.id} annotationId={selection.id} onDeselect={() => setSelection(null)} />
+          ) : selection?.kind === "textAnnotation" ? (
+            <TextAnnotationProperties panelId={activePanel.id} annotationId={selection.id} onDeselect={() => setSelection(null)} />
           ) : (
             <PanelProperties panel={activePanel} />
           )}
@@ -2435,6 +2564,102 @@ function LoadAnnotationProperties({ panelId, annotationId, onDeselect }: { panel
 
       <div className="text-xs text-muted-foreground">
         <p>Drag to reposition. Edit the label above to annotate the load.</p>
+      </div>
+    </div>
+  );
+}
+
+function TextAnnotationProperties({ panelId, annotationId, onDeselect }: { panelId: string; annotationId: string; onDeselect: () => void }) {
+  const { project, updateTextAnnotation, deleteTextAnnotation } = useProject();
+  const panel = project.panels.find(p => p.id === panelId);
+  const ta = panel?.textAnnotations?.find(t => t.id === annotationId);
+  if (!ta) return null;
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex justify-between items-center">
+        <h3 className="font-bold text-sm text-primary" data-testid="text-annotation-title">Text Box</h3>
+        <div className="flex gap-1">
+          <Button variant="ghost" size="sm" onClick={onDeselect} data-testid="button-deselect-text">
+            <MousePointer2 className="w-4 h-4" />
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => { deleteTextAnnotation(panelId, annotationId); onDeselect(); }} data-testid="button-delete-text">
+            <Trash2 className="w-4 h-4 text-destructive" />
+          </Button>
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <Label className="text-[10px] uppercase">Text</Label>
+        <textarea
+          value={ta.text}
+          onChange={e => updateTextAnnotation(panelId, { ...ta, text: e.target.value })}
+          placeholder="Enter text..."
+          className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-xs ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 min-h-[80px] resize-y"
+          data-testid="input-text-content"
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1">
+          <Label className="text-[10px] uppercase">Width (in)</Label>
+          <Input
+            type="number"
+            value={ta.width}
+            onChange={e => updateTextAnnotation(panelId, { ...ta, width: Math.max(6, Number(e.target.value)) })}
+            className="h-8 text-xs font-mono"
+            data-testid="input-text-width"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-[10px] uppercase">Height (in)</Label>
+          <Input
+            type="number"
+            value={ta.height}
+            onChange={e => updateTextAnnotation(panelId, { ...ta, height: Math.max(6, Number(e.target.value)) })}
+            className="h-8 text-xs font-mono"
+            data-testid="input-text-height"
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1">
+          <Label className="text-[10px] uppercase">X (in)</Label>
+          <Input
+            type="number"
+            value={ta.x}
+            onChange={e => updateTextAnnotation(panelId, { ...ta, x: Number(e.target.value) })}
+            className="h-8 text-xs font-mono"
+            data-testid="input-text-x"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-[10px] uppercase">Y (in)</Label>
+          <Input
+            type="number"
+            value={ta.y}
+            onChange={e => updateTextAnnotation(panelId, { ...ta, y: Number(e.target.value) })}
+            className="h-8 text-xs font-mono"
+            data-testid="input-text-y"
+          />
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          id="show-border"
+          checked={ta.showBorder}
+          onChange={e => updateTextAnnotation(panelId, { ...ta, showBorder: e.target.checked })}
+          className="rounded border-gray-300"
+          data-testid="input-text-border"
+        />
+        <Label htmlFor="show-border" className="text-xs">Show border</Label>
+      </div>
+
+      <div className="text-xs text-muted-foreground">
+        <p>Drag to move. Drag the red corner handle to resize. Use arrow keys to nudge by 0.5".</p>
       </div>
     </div>
   );
