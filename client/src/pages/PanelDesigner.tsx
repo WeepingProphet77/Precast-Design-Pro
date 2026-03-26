@@ -1410,35 +1410,51 @@ export default function PanelDesigner() {
                         ax = 0; ay = -1;
                       } else if (lineDir === "down") {
                         ax = 0; ay = 1;
+                      } else if (lineDir === "left") {
+                        ax = -1; ay = 0;
+                      } else if (lineDir === "right") {
+                        ax = 1; ay = 0;
                       } else if (lineDir === "negative") {
-                        // Negative = away from panel (-Z) = down-left
                         ax = -0.7; ay = 0.7;
                       } else {
-                        // Positive = toward panel face (+Z) = up-right
+                        // Positive = toward panel face (+Z)
                         ax = 0.7; ay = -0.7;
                       }
 
                       const arrowLen = 18;
                       const arrowCount = Math.max(2, Math.floor(len / 30));
                       const arrows: React.ReactElement[] = [];
+                      // Arrows point FROM the outer connecting line TOWARD the base line
+                      // tx = tail (outer end), bx = base (arrowhead touches base line)
+                      const tailPoints: number[] = [];
                       for (let i = 0; i <= arrowCount; i++) {
                         const t = arrowCount === 0 ? 0.5 : i / arrowCount;
                         const bx = s1.x + dx * t;
                         const by = s1.y + dy * t;
                         const tx = bx + ax * arrowLen;
                         const ty = by + ay * arrowLen;
+                        tailPoints.push(tx, ty);
+                        // Arrow shaft from tail to base
                         arrows.push(
-                          <Line key={`arr-${i}`} points={[bx, by, tx, ty]} stroke={loadColor} strokeWidth={1.5} />,
-                          <Line key={`arh-${i}`} points={[tx - (ax * 4 + ux * 4), ty - (ay * 4 + uy * 4), tx, ty, tx - (ax * 4 - ux * 4), ty - (ay * 4 - uy * 4)]} stroke={loadColor} strokeWidth={1.5} />
+                          <Line key={`arr-${i}`} points={[tx, ty, bx, by]} stroke={loadColor} strokeWidth={1.5} />
+                        );
+                        // Arrowhead at the base (touching the applied line)
+                        arrows.push(
+                          <Line key={`arh-${i}`} points={[bx + (ax * 4 + ux * 4), by + (ay * 4 + uy * 4), bx, by, bx + (ax * 4 - ux * 4), by + (ay * 4 - uy * 4)]} stroke={loadColor} strokeWidth={1.5} />
                         );
                       }
                       const labelX = (s1.x + s2.x) / 2 + ax * (arrowLen + 10);
                       const labelY = (s1.y + s2.y) / 2 + ay * (arrowLen + 10);
                       return (
                         <Group key={ann.id} onClick={(e) => { e.cancelBubble = true; setSelection({ kind: "loadAnnotation", id: ann.id }); }}>
-                          <Line points={[s1.x, s1.y, s2.x, s2.y]} stroke={loadColor} strokeWidth={2} hitStrokeWidth={12} />
+                          {/* Connecting line along the tail ends of the arrows */}
+                          {tailPoints.length >= 4 && (
+                            <Line points={tailPoints} stroke={loadColor} strokeWidth={1.5} />
+                          )}
                           {arrows}
                           {ann.label && <Text text={ann.label} x={labelX} y={labelY - 6} fontSize={10} fill={loadColor} fontStyle="bold" />}
+                          {/* Invisible hit area along base line for click detection */}
+                          <Line points={[s1.x, s1.y, s2.x, s2.y]} stroke="transparent" hitStrokeWidth={14} />
                           {isAnnSelected && (
                             <>
                               <Circle x={s1.x} y={s1.y} radius={5} fill="#dc2626" opacity={0.7} />
@@ -2170,6 +2186,8 @@ function LoadAnnotationProperties({ panelId, annotationId, onDeselect }: { panel
                 <SelectItem value="negative">Negative (Away from Panel)</SelectItem>
                 <SelectItem value="up">Up</SelectItem>
                 <SelectItem value="down">Down</SelectItem>
+                <SelectItem value="left">Left</SelectItem>
+                <SelectItem value="right">Right</SelectItem>
               </SelectContent>
             </Select>
           </div>

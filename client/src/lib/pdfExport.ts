@@ -301,10 +301,6 @@ function drawLoadAnnotationsOnPdf(
       const ex = ox + (ann.endX - minX) * pdfScale;
       const ey = oy + (ph - (ann.endY - minY)) * pdfScale;
 
-      // Base line
-      doc.setLineWidth(0.5);
-      doc.line(sx, sy, ex, ey);
-
       // Arrows along the line
       const dx = ex - sx;
       const dy = ey - sy;
@@ -319,28 +315,39 @@ function drawLoadAnnotationsOnPdf(
         ax = 0; ay = -1;
       } else if (lineDir === "down") {
         ax = 0; ay = 1;
+      } else if (lineDir === "left") {
+        ax = -1; ay = 0;
+      } else if (lineDir === "right") {
+        ax = 1; ay = 0;
       } else if (lineDir === "negative") {
-        // Negative = away from panel (-Z) = down-left
         ax = -0.7; ay = 0.7;
       } else {
-        // Positive = toward panel face (+Z) = up-right
+        // Positive = toward panel face (+Z)
         ax = 0.7; ay = -0.7;
       }
 
       const arrowLen = 6;
       const arrowCount = Math.max(2, Math.floor(len / 12));
 
+      // Connecting line along the tail ends
+      const t0bx = sx + ax * arrowLen;
+      const t0by = sy + ay * arrowLen;
+      const tNbx = ex + ax * arrowLen;
+      const tNby = ey + ay * arrowLen;
       doc.setLineWidth(0.3);
+      doc.line(t0bx, t0by, tNbx, tNby);
+
+      // Arrows: shaft from tail to base, arrowhead at base (touching applied line)
       for (let i = 0; i <= arrowCount; i++) {
         const t = arrowCount === 0 ? 0.5 : i / arrowCount;
         const bx = sx + dx * t;
         const by = sy + dy * t;
         const tx = bx + ax * arrowLen;
         const ty = by + ay * arrowLen;
-        doc.line(bx, by, tx, ty);
-        // Arrow head
-        doc.line(tx, ty, tx - (ax * 1.5 + ux * 1.5), ty - (ay * 1.5 + uy * 1.5));
-        doc.line(tx, ty, tx - (ax * 1.5 - ux * 1.5), ty - (ay * 1.5 - uy * 1.5));
+        doc.line(tx, ty, bx, by);
+        // Arrowhead at base
+        doc.line(bx + (ax * 1.5 + ux * 1.5), by + (ay * 1.5 + uy * 1.5), bx, by);
+        doc.line(bx + (ax * 1.5 - ux * 1.5), by + (ay * 1.5 - uy * 1.5), bx, by);
       }
 
       if (ann.label) {
