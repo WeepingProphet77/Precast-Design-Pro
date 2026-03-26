@@ -314,16 +314,17 @@ function drawLoadAnnotationsOnPdf(
 
       // Arrow direction based on ann.direction
       let ax: number, ay: number;
-      const lineDir = ann.direction || "toward";
+      const lineDir = ann.direction || "positive";
       if (lineDir === "up") {
         ax = 0; ay = -1;
       } else if (lineDir === "down") {
         ax = 0; ay = 1;
-      } else if (lineDir === "away") {
-        ax = -0.7; ay = 0.7;
-      } else {
-        // "toward" = out-of-plane at Z angle
+      } else if (lineDir === "negative") {
+        // Negative = away from panel (toward viewer) = up-right
         ax = 0.7; ay = -0.7;
+      } else {
+        // Positive = toward panel (away from viewer) = down-left
+        ax = -0.7; ay = 0.7;
       }
 
       const arrowLen = 6;
@@ -379,7 +380,8 @@ function drawLoadAnnotationsOnPdf(
     } else if (ann.type === "point_out_of_plane") {
       // Foreshortened arrow at ~45deg angle representing Z axis
       const zx = 0.7, zy = -0.7;
-      const sign = ann.direction === "away" ? -1 : 1;
+      // Positive = toward panel (down-left), Negative = away from panel (up-right)
+      const sign = ann.direction === "positive" ? -1 : 1;
       const tipX = px + sign * arrowSize * zx;
       const tipY = py + sign * arrowSize * zy;
       doc.setLineWidth(0.5);
