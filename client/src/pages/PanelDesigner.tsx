@@ -518,6 +518,7 @@ export default function PanelDesigner() {
           endX: ptX,
           endY: ptY,
           endRef: ref,
+          direction: "toward",
           label: "",
         };
         addLoadAnnotation(activePanel.id, annotation);
@@ -1201,6 +1202,15 @@ export default function PanelDesigner() {
                             <Line points={[-4, -DATUM_SIZE + 6, 0, -DATUM_SIZE, 4, -DATUM_SIZE + 6]} stroke="#16a34a" strokeWidth={2} />
                             <Text text="Y" x={-6} y={-DATUM_SIZE - 16} fontSize={11} fill="#16a34a" fontStyle="bold" />
 
+                            {/* Z axis at ~45deg angle (out-of-plane) */}
+                            <Line points={[0, 0, DATUM_SIZE * 0.7, -DATUM_SIZE * 0.7]} stroke="#2563eb" strokeWidth={2} />
+                            <Line points={[
+                              DATUM_SIZE * 0.7 - 0.7 * 6 - 0.7 * 4, -DATUM_SIZE * 0.7 + 0.7 * 6 - 0.7 * 4,
+                              DATUM_SIZE * 0.7, -DATUM_SIZE * 0.7,
+                              DATUM_SIZE * 0.7 - 0.7 * 6 + 0.7 * 4, -DATUM_SIZE * 0.7 + 0.7 * 6 + 0.7 * 4,
+                            ]} stroke="#2563eb" strokeWidth={2} />
+                            <Text text="Z" x={DATUM_SIZE * 0.7 + 4} y={-DATUM_SIZE * 0.7 - 12} fontSize={11} fill="#2563eb" fontStyle="bold" />
+
                             <Circle x={0} y={0} radius={3} fill="#2563eb" />
                             <Text text="0,0" x={6} y={4} fontSize={10} fill="#64748b" />
                           </Group>
@@ -1392,9 +1402,21 @@ export default function PanelDesigner() {
                       const len = Math.sqrt(dx * dx + dy * dy) || 1;
                       const ux = dx / len;
                       const uy = dy / len;
-                      // Perpendicular (outward arrows)
-                      const px = -uy;
-                      const py = ux;
+
+                      // Arrow direction based on ann.direction
+                      let ax: number, ay: number;
+                      const lineDir = ann.direction || "toward";
+                      if (lineDir === "up") {
+                        ax = 0; ay = -1;
+                      } else if (lineDir === "down") {
+                        ax = 0; ay = 1;
+                      } else if (lineDir === "away") {
+                        ax = -0.7; ay = 0.7; // opposite of Z
+                      } else {
+                        // "toward" = out-of-plane at Z angle
+                        ax = 0.7; ay = -0.7;
+                      }
+
                       const arrowLen = 18;
                       const arrowCount = Math.max(2, Math.floor(len / 30));
                       const arrows: React.ReactElement[] = [];
@@ -1402,15 +1424,15 @@ export default function PanelDesigner() {
                         const t = arrowCount === 0 ? 0.5 : i / arrowCount;
                         const bx = s1.x + dx * t;
                         const by = s1.y + dy * t;
-                        const tx = bx + px * arrowLen;
-                        const ty = by + py * arrowLen;
+                        const tx = bx + ax * arrowLen;
+                        const ty = by + ay * arrowLen;
                         arrows.push(
                           <Line key={`arr-${i}`} points={[bx, by, tx, ty]} stroke={loadColor} strokeWidth={1.5} />,
-                          <Line key={`arh-${i}`} points={[tx - (px * 4 + ux * 4), ty - (py * 4 + uy * 4), tx, ty, tx - (px * 4 - ux * 4), ty - (py * 4 - uy * 4)]} stroke={loadColor} strokeWidth={1.5} />
+                          <Line key={`arh-${i}`} points={[tx - (ax * 4 + ux * 4), ty - (ay * 4 + uy * 4), tx, ty, tx - (ax * 4 - ux * 4), ty - (ay * 4 - uy * 4)]} stroke={loadColor} strokeWidth={1.5} />
                         );
                       }
-                      const labelX = (s1.x + s2.x) / 2 + px * (arrowLen + 10);
-                      const labelY = (s1.y + s2.y) / 2 + py * (arrowLen + 10);
+                      const labelX = (s1.x + s2.x) / 2 + ax * (arrowLen + 10);
+                      const labelY = (s1.y + s2.y) / 2 + ay * (arrowLen + 10);
                       return (
                         <Group key={ann.id} onClick={(e) => { e.cancelBubble = true; setSelection({ kind: "loadAnnotation", id: ann.id }); }}>
                           <Line points={[s1.x, s1.y, s2.x, s2.y]} stroke={loadColor} strokeWidth={2} hitStrokeWidth={12} />
@@ -1471,7 +1493,12 @@ export default function PanelDesigner() {
                     }
 
                     if (ann.type === "point_out_of_plane") {
-                      const isToward = ann.direction === "toward";
+                      // Foreshortened arrow at ~45deg angle representing Z axis
+                      const zDirX = 0.7;  // screen-space Z direction (up-right)
+                      const zDirY = -0.7;
+                      const sign = ann.direction === "away" ? -1 : 1;
+                      const tipX = sign * arrowSize * zDirX;
+                      const tipY = sign * arrowSize * zDirY;
                       return (
                         <Group key={ann.id} x={s.x} y={s.y} draggable
                           onDragEnd={(e) => {
@@ -1483,18 +1510,14 @@ export default function PanelDesigner() {
                           }}
                           onClick={(e) => { e.cancelBubble = true; setSelection({ kind: "loadAnnotation", id: ann.id }); }}
                         >
-                          <Circle radius={10} stroke={loadColor} strokeWidth={2} fill="transparent" />
-                          {isToward ? (
-                            // Dot in center = coming toward viewer
-                            <Circle radius={3} fill={loadColor} />
-                          ) : (
-                            // X = going away from viewer
-                            <>
-                              <Line points={[-6, -6, 6, 6]} stroke={loadColor} strokeWidth={2} />
-                              <Line points={[-6, 6, 6, -6]} stroke={loadColor} strokeWidth={2} />
-                            </>
-                          )}
-                          {ann.label && <Text text={ann.label} x={14} y={-6} fontSize={10} fill={loadColor} fontStyle="bold" />}
+                          <Line points={[0, 0, tipX, tipY]} stroke={loadColor} strokeWidth={2.5} />
+                          {/* Arrowhead */}
+                          <Line points={[
+                            tipX - sign * (zDirX * 8 + zDirY * 4), tipY - sign * (zDirY * 8 - zDirX * 4),
+                            tipX, tipY,
+                            tipX - sign * (zDirX * 8 - zDirY * 4), tipY - sign * (zDirY * 8 + zDirX * 4),
+                          ]} stroke={loadColor} strokeWidth={2.5} />
+                          {ann.label && <Text text={ann.label} x={tipX + 6} y={tipY - 6} fontSize={10} fill={loadColor} fontStyle="bold" />}
                         </Group>
                       );
                     }
@@ -2131,6 +2154,23 @@ function LoadAnnotationProperties({ panelId, annotationId, onDeselect }: { panel
 
       {ann.type === "line_load" && (
         <>
+          <div className="space-y-1">
+            <Label className="text-[10px] uppercase">Arrow Direction</Label>
+            <Select
+              value={ann.direction || "toward"}
+              onValueChange={(val) => updateLoadAnnotation(panelId, { ...ann, direction: val as any })}
+            >
+              <SelectTrigger className="h-8 text-xs" data-testid="select-line-load-direction">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="toward">Out-of-Plane (Toward)</SelectItem>
+                <SelectItem value="away">Out-of-Plane (Away)</SelectItem>
+                <SelectItem value="up">Up</SelectItem>
+                <SelectItem value="down">Down</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           <div className="space-y-2">
             <div className="text-[10px] uppercase font-semibold text-muted-foreground">Start Point</div>
             <div className="text-xs font-mono">({ann.startX.toFixed(2)}, {ann.startY.toFixed(2)})</div>
