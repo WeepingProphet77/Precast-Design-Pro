@@ -518,7 +518,7 @@ export default function PanelDesigner() {
           endX: ptX,
           endY: ptY,
           endRef: ref,
-          direction: "toward",
+          direction: "positive",
           label: "",
         };
         addLoadAnnotation(activePanel.id, annotation);
@@ -540,10 +540,10 @@ export default function PanelDesigner() {
         load_point_horizontal: "point_horizontal",
         load_point_oop: "point_out_of_plane",
       };
-      const directionMap: Record<string, "down" | "right" | "toward"> = {
+      const directionMap: Record<string, "down" | "right" | "positive"> = {
         load_point_vertical: "down",
         load_point_horizontal: "right",
-        load_point_oop: "toward",
+        load_point_oop: "positive",
       };
 
       const annotation: LoadAnnotation = {
@@ -1405,16 +1405,17 @@ export default function PanelDesigner() {
 
                       // Arrow direction based on ann.direction
                       let ax: number, ay: number;
-                      const lineDir = ann.direction || "toward";
+                      const lineDir = ann.direction || "positive";
                       if (lineDir === "up") {
                         ax = 0; ay = -1;
                       } else if (lineDir === "down") {
                         ax = 0; ay = 1;
-                      } else if (lineDir === "away") {
-                        ax = -0.7; ay = 0.7; // opposite of Z
-                      } else {
-                        // "toward" = out-of-plane at Z angle
+                      } else if (lineDir === "negative") {
+                        // Negative = away from panel (toward viewer) = up-right
                         ax = 0.7; ay = -0.7;
+                      } else {
+                        // Positive = toward panel (away from viewer) = down-left
+                        ax = -0.7; ay = 0.7;
                       }
 
                       const arrowLen = 18;
@@ -1496,7 +1497,8 @@ export default function PanelDesigner() {
                       // Foreshortened arrow at ~45deg angle representing Z axis
                       const zDirX = 0.7;  // screen-space Z direction (up-right)
                       const zDirY = -0.7;
-                      const sign = ann.direction === "away" ? -1 : 1;
+                      // Positive = toward panel (down-left), Negative = away from panel (up-right)
+                      const sign = ann.direction === "positive" ? -1 : 1;
                       const tipX = sign * arrowSize * zDirX;
                       const tipY = sign * arrowSize * zDirY;
                       return (
@@ -2157,15 +2159,15 @@ function LoadAnnotationProperties({ panelId, annotationId, onDeselect }: { panel
           <div className="space-y-1">
             <Label className="text-[10px] uppercase">Arrow Direction</Label>
             <Select
-              value={ann.direction || "toward"}
+              value={ann.direction || "positive"}
               onValueChange={(val) => updateLoadAnnotation(panelId, { ...ann, direction: val as any })}
             >
               <SelectTrigger className="h-8 text-xs" data-testid="select-line-load-direction">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="toward">Out-of-Plane (Toward)</SelectItem>
-                <SelectItem value="away">Out-of-Plane (Away)</SelectItem>
+                <SelectItem value="positive">Positive (Toward Panel)</SelectItem>
+                <SelectItem value="negative">Negative (Away from Panel)</SelectItem>
                 <SelectItem value="up">Up</SelectItem>
                 <SelectItem value="down">Down</SelectItem>
               </SelectContent>
@@ -2213,8 +2215,8 @@ function LoadAnnotationProperties({ panelId, annotationId, onDeselect }: { panel
                   )}
                   {ann.type === "point_out_of_plane" && (
                     <>
-                      <SelectItem value="toward">Toward Viewer</SelectItem>
-                      <SelectItem value="away">Away from Viewer</SelectItem>
+                      <SelectItem value="positive">Positive (Toward Panel)</SelectItem>
+                      <SelectItem value="negative">Negative (Away from Panel)</SelectItem>
                     </>
                   )}
                 </SelectContent>

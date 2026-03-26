@@ -146,7 +146,7 @@ export interface LoadAnnotation {
   endY: number;
   endRef: DimensionSnapRef;
   // For point loads: direction
-  direction?: "up" | "down" | "left" | "right" | "toward" | "away";
+  direction?: "up" | "down" | "left" | "right" | "positive" | "negative";
   label: string;
 }
 
