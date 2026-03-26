@@ -764,7 +764,6 @@ export default function PanelDesigner() {
     const stroke = isSelected ? "#991b1b" : "#15803d";
     // Multi-selected connections get a blue highlight ring to distinguish from single-select (red)
     const multiRingColor = "#3b82f6";
-    const multiRingStroke = "#1d4ed8";
     const size = 16;
 
     const markerShape = (() => {
@@ -815,19 +814,21 @@ export default function PanelDesigner() {
       }
     })();
 
+    if (!isMultiSelected) return markerShape;
+
+    // Wrap in a Konva Group to hold both the ring and the marker shape
+    // (React fragments are not supported by react-konva)
     return (
-      <>
-        {isMultiSelected && (
-          <Circle
-            radius={size + 6}
-            fill="transparent"
-            stroke={multiRingColor}
-            strokeWidth={2.5}
-            dash={[6, 3]}
-          />
-        )}
+      <Group>
+        <Circle
+          radius={size + 6}
+          fill="transparent"
+          stroke={multiRingColor}
+          strokeWidth={2.5}
+          dash={[6, 3]}
+        />
         {markerShape}
-      </>
+      </Group>
     );
   };
 
