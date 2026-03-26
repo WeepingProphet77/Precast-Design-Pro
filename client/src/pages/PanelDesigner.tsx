@@ -63,6 +63,9 @@ export default function PanelDesigner() {
   const [loadLineFirstPoint, setLoadLineFirstPoint] = useState<{ x: number; y: number; ref: DimensionSnapRef } | null>(null);
   const [loadLinePreviewEnd, setLoadLinePreviewEnd] = useState<{ x: number; y: number } | null>(null);
 
+  // Text box resize state
+  const [textResizing, setTextResizing] = useState<{ id: string; startScreenX: number; startScreenY: number; origW: number; origH: number } | null>(null);
+
   // Orthographic drag state for connections and load annotations
   const [dragState, setDragState] = useState<{
     elementType: "connection" | "loadAnnotation";
@@ -1842,27 +1845,19 @@ export default function PanelDesigner() {
                             fill="#dc2626" opacity={0.7}
                             cornerRadius={2}
                             draggable
-                            onDragMove={(e) => {
-                              // Clamp: compute new size from handle position relative to text box top-left
-                              const handleX = e.target.x() + 6; // center of handle
-                              const handleY = e.target.y() + 6;
-                              const newScreenW = Math.max(30, handleX - tl.x);
-                              const newScreenH = Math.max(30, handleY - tl.y);
-                              const newW = Math.max(6, Math.round((newScreenW / scale) / 0.5) * 0.5);
-                              const newH = Math.max(6, Math.round((newScreenH / scale) / 0.5) * 0.5);
-                              // Snap handle to the computed grid position
-                              const snappedX = tl.x + newW * scale - 6;
-                              const snappedY = tl.y + newH * scale - 6;
-                              e.target.position({ x: snappedX, y: snappedY });
+                            onDragStart={(e) => {
+                              e.cancelBubble = true;
+                              setTextResizing({ id: ta.id, startScreenX: e.target.x(), startScreenY: e.target.y(), origW: ta.width, origH: ta.height });
                             }}
                             onDragEnd={(e) => {
-                              const handleX = e.target.x() + 6;
-                              const handleY = e.target.y() + 6;
-                              const newScreenW = Math.max(30, handleX - tl.x);
-                              const newScreenH = Math.max(30, handleY - tl.y);
-                              const newW = Math.max(6, Math.round((newScreenW / scale) / 0.5) * 0.5);
-                              const newH = Math.max(6, Math.round((newScreenH / scale) / 0.5) * 0.5);
-                              updateTextAnnotation(activePanel.id, { ...ta, width: newW, height: newH });
+                              if (textResizing && textResizing.id === ta.id) {
+                                const dx = e.target.x() - textResizing.startScreenX;
+                                const dy = e.target.y() - textResizing.startScreenY;
+                                const newW = Math.max(6, Math.round(((textResizing.origW * scale + dx) / scale) / 0.5) * 0.5);
+                                const newH = Math.max(6, Math.round(((textResizing.origH * scale + dy) / scale) / 0.5) * 0.5);
+                                updateTextAnnotation(activePanel.id, { ...ta, width: newW, height: newH });
+                              }
+                              setTextResizing(null);
                             }}
                           />
                         )}
