@@ -85,6 +85,13 @@ export default function PanelDesigner() {
   const SNAP_TOLERANCE = 10;
   const GRID_SPACING = 12;
   const DATUM_SIZE = 30;
+  const ARROW_KEY_INCREMENT = 0.5; // inches per arrow key press
+
+  // Refs for arrow-key nudge (so the keydown handler always sees latest state)
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
+  const activePanelRef = useRef(activePanel);
+  activePanelRef.current = activePanel;
 
   useEffect(() => {
     const p = project.panels.find(p => p.id === activePanelId);
@@ -594,6 +601,45 @@ export default function PanelDesigner() {
         setLoadLinePreviewEnd(null);
       }
       if (e.key === "Shift") setShiftHeld(true);
+
+      // Arrow key nudge for selected connections and load annotations
+      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+        const sel = selectionRef.current;
+        const panel = activePanelRef.current;
+        if (!sel || !panel) return;
+        // Don't intercept if an input is focused
+        if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA") return;
+        e.preventDefault();
+
+        const inc = ARROW_KEY_INCREMENT;
+        let dx = 0, dy = 0;
+        if (e.key === "ArrowLeft") dx = -inc;
+        if (e.key === "ArrowRight") dx = inc;
+        if (e.key === "ArrowUp") dy = inc;    // CAD Y is up
+        if (e.key === "ArrowDown") dy = -inc;
+
+        if (sel.kind === "connection") {
+          const conn = panel.connections.find(c => c.id === sel.id);
+          if (conn) {
+            updateConnection(panel.id, {
+              ...conn,
+              x: Math.round((conn.x + dx) * 10) / 10,
+              y: Math.round((conn.y + dy) * 10) / 10,
+            });
+          }
+        } else if (sel.kind === "loadAnnotation") {
+          const ann = panel.loadAnnotations?.find(a => a.id === sel.id);
+          if (ann) {
+            updateLoadAnnotation(panel.id, {
+              ...ann,
+              startX: Math.round((ann.startX + dx) * 10) / 10,
+              startY: Math.round((ann.startY + dy) * 10) / 10,
+              endX: Math.round((ann.endX + dx) * 10) / 10,
+              endY: Math.round((ann.endY + dy) * 10) / 10,
+            });
+          }
+        }
+      }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.key === "Shift") setShiftHeld(false);
