@@ -717,6 +717,14 @@ export default function PanelDesigner() {
     };
   }, []);
 
+  // Derive set of selected connection IDs (works for both single and multi-select).
+  // Must be before the early-return guard to satisfy React's rules of hooks.
+  const selectedConnectionIds: Set<string> = useMemo(() => {
+    if (selection?.kind === "connection") return new Set([selection.id]);
+    if (selection?.kind === "connections") return selection.ids;
+    return new Set();
+  }, [selection]);
+
   if (!activePanel) {
     return (
       <div className="flex-1 flex items-center justify-center bg-slate-100" data-testid="empty-state">
@@ -749,11 +757,6 @@ export default function PanelDesigner() {
     }
   }
 
-  const selectedConnectionIds: Set<string> = useMemo(() => {
-    if (selection?.kind === "connection") return new Set([selection.id]);
-    if (selection?.kind === "connections") return selection.ids;
-    return new Set();
-  }, [selection]);
   const isCentroidSelected = selection?.kind === "centroid";
 
   const renderConnectionMarker = (c: ConnectionNode, isSelected: boolean, isMultiSelected: boolean) => {
