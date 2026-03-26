@@ -32,7 +32,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 
-type SelectionType = { kind: "connection"; id: string } | { kind: "centroid" } | { kind: "viewCentroid"; viewId: string } | { kind: "dimension"; id: string } | { kind: "userLine"; id: string } | { kind: "loadAnnotation"; id: string } | { kind: "textAnnotation"; id: string } | null;
+type SelectionType = { kind: "connection"; id: string } | { kind: "connections"; ids: Set<string> } | { kind: "centroid" } | { kind: "viewCentroid"; viewId: string } | { kind: "dimension"; id: string } | { kind: "userLine"; id: string } | { kind: "loadAnnotation"; id: string } | { kind: "textAnnotation"; id: string } | null;
 
 type ToolType = "select" | "connection" | "dimension" | "line_solid" | "line_hidden" | "load_line" | "load_point_vertical" | "load_point_horizontal" | "load_point_oop" | "textbox";
 
@@ -650,6 +650,18 @@ export default function PanelDesigner() {
               y: Math.round((conn.y + dy) * 10) / 10,
             });
           }
+        } else if (sel.kind === "connections") {
+          // Nudge all selected connections together
+          sel.ids.forEach(id => {
+            const conn = panel.connections.find(c => c.id === id);
+            if (conn) {
+              updateConnection(panel.id, {
+                ...conn,
+                x: Math.round((conn.x + dx) * 10) / 10,
+                y: Math.round((conn.y + dy) * 10) / 10,
+              });
+            }
+          });
         } else if (sel.kind === "loadAnnotation") {
           const ann = panel.loadAnnotations?.find(a => a.id === sel.id);
           if (ann) {
@@ -738,60 +750,85 @@ export default function PanelDesigner() {
     }
   }
 
-  const selectedConnectionId = selection?.kind === "connection" ? selection.id : null;
+  // Derive set of selected connection IDs (works for both single and multi-select)
+  const selectedConnectionIds: Set<string> = useMemo(() => {
+    if (selection?.kind === "connection") return new Set([selection.id]);
+    if (selection?.kind === "connections") return selection.ids;
+    return new Set();
+  }, [selection]);
   const isCentroidSelected = selection?.kind === "centroid";
 
-  const renderConnectionMarker = (c: ConnectionNode, isSelected: boolean) => {
+  const renderConnectionMarker = (c: ConnectionNode, isSelected: boolean, isMultiSelected: boolean) => {
     const markerType = c.marker || "diamond";
     const fill = isSelected ? "#dc2626" : "#22c55e";
     const stroke = isSelected ? "#991b1b" : "#15803d";
+    // Multi-selected connections get a blue highlight ring to distinguish from single-select (red)
+    const multiRingColor = "#3b82f6";
+    const multiRingStroke = "#1d4ed8";
     const size = 16;
 
-    switch (markerType) {
-      case "triangle-down":
-        return (
-          <RegularPolygon
-            sides={3}
-            radius={size}
-            fill={fill}
-            stroke={stroke}
-            strokeWidth={1}
-            rotation={180}
-          />
-        );
-      case "circle":
-        return (
+    const markerShape = (() => {
+      switch (markerType) {
+        case "triangle-down":
+          return (
+            <RegularPolygon
+              sides={3}
+              radius={size}
+              fill={fill}
+              stroke={stroke}
+              strokeWidth={1}
+              rotation={180}
+            />
+          );
+        case "circle":
+          return (
+            <Circle
+              radius={size - 1}
+              fill={fill}
+              stroke={stroke}
+              strokeWidth={1}
+            />
+          );
+        case "square":
+          return (
+            <Rect
+              x={-size + 1}
+              y={-size + 1}
+              width={(size - 1) * 2}
+              height={(size - 1) * 2}
+              fill={fill}
+              stroke={stroke}
+              strokeWidth={1}
+            />
+          );
+        case "diamond":
+        default:
+          return (
+            <Rect
+              x={-12} y={-12} width={24} height={24}
+              fill={fill}
+              stroke={stroke}
+              strokeWidth={1}
+              rotation={45}
+            />
+          );
+      }
+    })();
+
+    return (
+      <>
+        {isMultiSelected && (
           <Circle
-            radius={size - 1}
-            fill={fill}
-            stroke={stroke}
-            strokeWidth={1}
+            radius={size + 6}
+            fill="transparent"
+            stroke={multiRingColor}
+            strokeWidth={2.5}
+            dash={[6, 3]}
           />
-        );
-      case "square":
-        return (
-          <Rect
-            x={-size + 1}
-            y={-size + 1}
-            width={(size - 1) * 2}
-            height={(size - 1) * 2}
-            fill={fill}
-            stroke={stroke}
-            strokeWidth={1}
-          />
-        );
-      case "diamond":
-      default:
-        return (
-          <Rect
-            x={-12} y={-12} width={24} height={24}
-            fill={fill}
-            stroke={stroke}
-            strokeWidth={1}
-            rotation={45}
-          />
-        );
-    }
+        )}
+        {markerShape}
+      </>
+    );
   };
 
   return (
@@ -1404,13 +1441,15 @@ export default function PanelDesigner() {
 
                   {activePanel.connections.map(c => {
                     const s = screenFromCad(c.x, c.y);
-                    const isSelected = selectedConnectionId === c.id;
+                    const isSelected = selectedConnectionIds.has(c.id);
+                    const isMultiSelected = isSelected && selectedConnectionIds.size > 1;
                     return (
                       <Group
                         key={c.id}
                         x={s.x}
                         y={s.y}
-                        draggable
+                        // Disable drag when multiple connections are selected to avoid partial moves
+                        draggable={selectedConnectionIds.size <= 1}
                         onDragStart={() => {
                           setDragState({
                             elementType: "connection",
@@ -1467,10 +1506,30 @@ export default function PanelDesigner() {
                         }}
                         onClick={(e) => {
                           e.cancelBubble = true;
-                          setSelection({ kind: "connection", id: c.id });
+                          const nativeEvt = e.evt as MouseEvent;
+                          if (nativeEvt.shiftKey) {
+                            // Shift+click: toggle this connection in the multi-selection
+                            const current = new Set(selectedConnectionIds);
+                            if (current.has(c.id)) {
+                              current.delete(c.id);
+                            } else {
+                              current.add(c.id);
+                            }
+                            if (current.size === 0) {
+                              setSelection(null);
+                            } else if (current.size === 1) {
+                              const onlyId = Array.from(current)[0];
+                              setSelection({ kind: "connection", id: onlyId });
+                            } else {
+                              setSelection({ kind: "connections", ids: current });
+                            }
+                          } else {
+                            // Normal click: single select
+                            setSelection({ kind: "connection", id: c.id });
+                          }
                         }}
                       >
-                        {renderConnectionMarker(c, isSelected)}
+                        {renderConnectionMarker(c, isSelected, isMultiSelected)}
                         <Text text={c.label} x={10} y={-16} fontSize={14} fontStyle="bold" fill="#1e293b" />
                         <Text text={`(${c.x.toFixed(1)}, ${c.y.toFixed(1)})`} x={10} y={2} fontSize={12} fill="#64748b" />
                       </Group>
@@ -2058,7 +2117,9 @@ export default function PanelDesigner() {
         </div>
 
         <div className="w-[340px] border-l bg-card flex flex-col shrink-0 shadow-sm z-10">
-          {selection?.kind === "connection" ? (
+          {selection?.kind === "connections" ? (
+            <MultiConnectionProperties panelId={activePanel.id} connectionIds={selection.ids} onDeselect={() => setSelection(null)} />
+          ) : selection?.kind === "connection" ? (
             <ConnectionProperties panelId={activePanel.id} connectionId={selection.id} onDeselect={() => setSelection(null)} />
           ) : selection?.kind === "centroid" ? (
             <CentroidProperties panel={activePanel} computedCentroid={computedCentroid} onDeselect={() => setSelection(null)} />
@@ -2858,6 +2919,194 @@ function ConnectionProperties({ panelId, connectionId, onDeselect }: { panelId: 
                 </div>
               ));
             })()}
+          </div>
+        </TabsContent>
+      </ScrollArea>
+    </Tabs>
+  );
+}
+
+function MultiConnectionProperties({ panelId, connectionIds, onDeselect }: { panelId: string; connectionIds: Set<string>; onDeselect: () => void }) {
+  const { project, updateConnection, deleteConnection } = useProject();
+  const panel = project.panels.find(p => p.id === panelId);
+  const connections = panel?.connections.filter(c => connectionIds.has(c.id)) || [];
+  if (connections.length === 0) return null;
+
+  const markerOptions: { value: ConnectionMarker; label: string }[] = [
+    { value: "triangle-down", label: "\u25bc Bearing" },
+    { value: "circle", label: "\u25cf Tieback" },
+    { value: "square", label: "\u25a0 Lateral" },
+    { value: "diamond", label: "\u25c6 Panel-to-Panel" },
+  ];
+
+  const loadLabels: Record<string, string> = {
+    D: "Dead",
+    L: "Live",
+    W: "Wind",
+    E: "Seismic",
+  };
+
+  // Helper: compute a shared value across all selected connections, or undefined if they differ
+  function sharedValue<T>(getter: (c: ConnectionNode) => T): T | undefined {
+    const first = getter(connections[0]);
+    return connections.every(c => getter(c) === first) ? first : undefined;
+  }
+
+  const sharedLabel = sharedValue(c => c.label);
+  const sharedType = sharedValue(c => c.type);
+  const sharedMarker = sharedValue(c => c.marker || "diamond");
+  const sharedX = sharedValue(c => c.x);
+  const sharedY = sharedValue(c => c.y);
+
+  // Apply a partial update to all selected connections
+  const updateAll = (updater: (c: ConnectionNode) => ConnectionNode) => {
+    connections.forEach(c => updateConnection(panelId, updater(c)));
+  };
+
+  const deleteAll = () => {
+    connections.forEach(c => deleteConnection(panelId, c.id));
+    onDeselect();
+  };
+
+  return (
+    <Tabs defaultValue="forces" className="flex-1 flex flex-col overflow-hidden">
+      <div className="p-4 border-b bg-muted/20">
+        <div className="flex justify-between items-center mb-3">
+          <h3 className="font-bold text-base text-primary">{connections.length} Connections Selected</h3>
+          <Button variant="ghost" size="sm" onClick={deleteAll}>
+            <Trash2 className="w-4 h-4 text-destructive" />
+          </Button>
+        </div>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-[10px] uppercase">Label</Label>
+              <Input
+                value={sharedLabel ?? ""}
+                placeholder={sharedLabel === undefined ? "Various" : undefined}
+                onChange={e => {
+                  const val = e.target.value;
+                  updateAll(c => ({ ...c, label: val }));
+                }}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px] uppercase">Type</Label>
+              <Select value={sharedType ?? "__various__"} onValueChange={val => {
+                if (val !== "__various__") updateAll(c => ({ ...c, type: val }));
+              }}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {sharedType === undefined && (
+                    <SelectItem value="__various__" disabled>Various</SelectItem>
+                  )}
+                  {project.capacities.map(cap => (
+                    <SelectItem key={cap.type} value={cap.type}>{cap.type}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-[10px] uppercase">Marker Icon</Label>
+            <Select value={sharedMarker ?? "__various__"} onValueChange={(val: string) => {
+              if (val !== "__various__") updateAll(c => ({ ...c, marker: val as ConnectionMarker }));
+            }}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {sharedMarker === undefined && (
+                  <SelectItem value="__various__" disabled>Various</SelectItem>
+                )}
+                {markerOptions.map(opt => (
+                  <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-[10px] uppercase">X (in)</Label>
+              <Input
+                type="number"
+                value={sharedX !== undefined ? sharedX : ""}
+                placeholder={sharedX === undefined ? "Various" : undefined}
+                onChange={e => {
+                  const val = Number(e.target.value);
+                  updateAll(c => ({ ...c, x: val }));
+                }}
+                className="h-8 text-xs font-mono"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px] uppercase">Y (in)</Label>
+              <Input
+                type="number"
+                value={sharedY !== undefined ? sharedY : ""}
+                placeholder={sharedY === undefined ? "Various" : undefined}
+                onChange={e => {
+                  const val = Number(e.target.value);
+                  updateAll(c => ({ ...c, y: val }));
+                }}
+                className="h-8 text-xs font-mono"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="border-b bg-muted/10">
+        <TabsList className="w-full justify-start rounded-none h-10 bg-transparent border-none">
+          <TabsTrigger value="forces" className="flex-1">Forces</TabsTrigger>
+        </TabsList>
+      </div>
+
+      <ScrollArea className="flex-1">
+        <TabsContent value="forces" className="p-4 m-0">
+          <div className="space-y-4">
+            {(["D", "W", "E", "L"] as const).map(caseKey => {
+              // For each force axis, check if all selected connections share the same value
+              const sharedForces: Record<string, number | undefined> = {};
+              for (const axis of ["x", "y", "z"] as const) {
+                const first = (connections[0].forces[caseKey] || { x: 0, y: 0, z: 0 })[axis];
+                const allSame = connections.every(c => {
+                  const f = c.forces[caseKey] || { x: 0, y: 0, z: 0 };
+                  return f[axis] === first;
+                });
+                sharedForces[axis] = allSame ? first : undefined;
+              }
+
+              return (
+                <div key={caseKey} className="space-y-2 p-3 bg-muted/20 rounded border border-border/50">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-bold text-primary">{caseKey}</div>
+                    <span className="text-xs font-bold uppercase tracking-wider">{loadLabels[caseKey]}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {["x", "y", "z"].map(axis => (
+                      <div key={axis} className="space-y-1">
+                        <Label className="text-[10px] uppercase">F{axis}</Label>
+                        <Input
+                          type="number"
+                          className="h-7 text-xs font-mono"
+                          value={sharedForces[axis] !== undefined ? sharedForces[axis] : ""}
+                          placeholder={sharedForces[axis] === undefined ? "Various" : undefined}
+                          onChange={e => {
+                            const val = Number(e.target.value);
+                            updateAll(c => ({
+                              ...c,
+                              forces: {
+                                ...c.forces,
+                                [caseKey]: { ...(c.forces[caseKey] || { x: 0, y: 0, z: 0 }), [axis]: val },
+                              },
+                            }));
+                          }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </TabsContent>
       </ScrollArea>
