@@ -311,8 +311,21 @@ function drawLoadAnnotationsOnPdf(
       const len = Math.sqrt(dx * dx + dy * dy) || 1;
       const ux = dx / len;
       const uy = dy / len;
-      const px = -uy;
-      const py = ux;
+
+      // Arrow direction based on ann.direction
+      let ax: number, ay: number;
+      const lineDir = ann.direction || "toward";
+      if (lineDir === "up") {
+        ax = 0; ay = -1;
+      } else if (lineDir === "down") {
+        ax = 0; ay = 1;
+      } else if (lineDir === "away") {
+        ax = -0.7; ay = 0.7;
+      } else {
+        // "toward" = out-of-plane at Z angle
+        ax = 0.7; ay = -0.7;
+      }
+
       const arrowLen = 6;
       const arrowCount = Math.max(2, Math.floor(len / 12));
 
@@ -321,17 +334,17 @@ function drawLoadAnnotationsOnPdf(
         const t = arrowCount === 0 ? 0.5 : i / arrowCount;
         const bx = sx + dx * t;
         const by = sy + dy * t;
-        const tx = bx + px * arrowLen;
-        const ty = by + py * arrowLen;
+        const tx = bx + ax * arrowLen;
+        const ty = by + ay * arrowLen;
         doc.line(bx, by, tx, ty);
         // Arrow head
-        doc.line(tx, ty, tx - (px * 1.5 + ux * 1.5), ty - (py * 1.5 + uy * 1.5));
-        doc.line(tx, ty, tx - (px * 1.5 - ux * 1.5), ty - (py * 1.5 - uy * 1.5));
+        doc.line(tx, ty, tx - (ax * 1.5 + ux * 1.5), ty - (ay * 1.5 + uy * 1.5));
+        doc.line(tx, ty, tx - (ax * 1.5 - ux * 1.5), ty - (ay * 1.5 - uy * 1.5));
       }
 
       if (ann.label) {
-        const mx = (sx + ex) / 2 + px * (arrowLen + 4);
-        const my = (sy + ey) / 2 + py * (arrowLen + 4);
+        const mx = (sx + ex) / 2 + ax * (arrowLen + 4);
+        const my = (sy + ey) / 2 + ay * (arrowLen + 4);
         doc.setFontSize(5);
         doc.text(ann.label, mx, my);
       }
@@ -364,17 +377,19 @@ function drawLoadAnnotationsOnPdf(
         doc.text(ann.label, px + (dir > 0 ? arrowSize + 2 : -arrowSize - 8), py - 2);
       }
     } else if (ann.type === "point_out_of_plane") {
-      doc.setLineWidth(0.4);
-      doc.circle(px, py, 3.5, "S");
-      if (ann.direction === "toward") {
-        doc.circle(px, py, 0.8, "F");
-      } else {
-        doc.line(px - 2, py - 2, px + 2, py + 2);
-        doc.line(px - 2, py + 2, px + 2, py - 2);
-      }
+      // Foreshortened arrow at ~45deg angle representing Z axis
+      const zx = 0.7, zy = -0.7;
+      const sign = ann.direction === "away" ? -1 : 1;
+      const tipX = px + sign * arrowSize * zx;
+      const tipY = py + sign * arrowSize * zy;
+      doc.setLineWidth(0.5);
+      doc.line(px, py, tipX, tipY);
+      // Arrowhead
+      doc.line(tipX, tipY, tipX - sign * (zx * 3 + zy * 1.5), tipY - sign * (zy * 3 - zx * 1.5));
+      doc.line(tipX, tipY, tipX - sign * (zx * 3 - zy * 1.5), tipY - sign * (zy * 3 + zx * 1.5));
       if (ann.label) {
         doc.setFontSize(5);
-        doc.text(ann.label, px + 5, py - 1);
+        doc.text(ann.label, tipX + 3, tipY - 2);
       }
     }
   });
