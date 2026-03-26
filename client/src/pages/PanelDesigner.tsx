@@ -10,8 +10,9 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { calculateLoadCombinations } from "@/lib/calculations";
 import { calculateCentroid } from "@/lib/centroid";
 import { parseDxfFile } from "@/lib/dxfParser";
+import { exportPanelToDxf } from "@/lib/dxfExport";
 import {
-  Plus, Trash2, ZoomIn, ZoomOut, MousePointer2, Upload, Square as SquareIcon,
+  Plus, Trash2, ZoomIn, ZoomOut, MousePointer2, Upload, Download, Square as SquareIcon,
   ArrowUpRight, Crosshair, RotateCcw, Ruler, Minus, MoreHorizontal,
   ArrowDown, ArrowUp, ArrowLeft, ArrowRight, Circle as CircleIcon,
   MoveHorizontal, ChevronDown, Pencil, Type
@@ -867,6 +868,16 @@ export default function PanelDesigner() {
             data-testid="button-import-dxf"
           >
             <Upload className="w-4 h-4 mr-1" /> Import DXF
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => exportPanelToDxf(activePanel)}
+            className="h-9"
+            disabled={!hasGeometry}
+            data-testid="button-export-dxf"
+          >
+            <Download className="w-4 h-4 mr-1" /> Export DXF
           </Button>
 
           <Dialog open={rectDialogOpen} onOpenChange={setRectDialogOpen}>
