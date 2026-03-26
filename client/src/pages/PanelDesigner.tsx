@@ -63,9 +63,10 @@ export default function PanelDesigner() {
   const [loadLineFirstPoint, setLoadLineFirstPoint] = useState<{ x: number; y: number; ref: DimensionSnapRef } | null>(null);
   const [loadLinePreviewEnd, setLoadLinePreviewEnd] = useState<{ x: number; y: number } | null>(null);
 
-  // Connection drag state for live dimensions
+  // Orthographic drag state for connections and load annotations
   const [dragState, setDragState] = useState<{
-    connectionId: string;
+    elementType: "connection" | "loadAnnotation";
+    elementId: string;
     originalX: number;
     originalY: number;
     currentX: number;
@@ -1283,7 +1284,8 @@ export default function PanelDesigner() {
                         draggable
                         onDragStart={() => {
                           setDragState({
-                            connectionId: c.id,
+                            elementType: "connection",
+                            elementId: c.id,
                             originalX: c.x,
                             originalY: c.y,
                             currentX: c.x,
@@ -1446,7 +1448,45 @@ export default function PanelDesigner() {
                       const labelX = (s1.x + s2.x) / 2 + ax * (arrowLen + 10);
                       const labelY = (s1.y + s2.y) / 2 + ay * (arrowLen + 10);
                       return (
-                        <Group key={ann.id} onClick={(e) => { e.cancelBubble = true; setSelection({ kind: "loadAnnotation", id: ann.id }); }}>
+                        <Group key={ann.id} draggable
+                          onDragStart={() => {
+                            const midX = (ann.startX + ann.endX) / 2;
+                            const midY = (ann.startY + ann.endY) / 2;
+                            setDragState({ elementType: "loadAnnotation", elementId: ann.id, originalX: midX, originalY: midY, currentX: midX, currentY: midY, axis: null });
+                          }}
+                          onDragMove={(e) => {
+                            const midX = (ann.startX + ann.endX) / 2;
+                            const midY = (ann.startY + ann.endY) / 2;
+                            const midScreen = screenFromCad(midX, midY);
+                            const rawCad = cadFromScreen(midScreen.x + e.target.x(), midScreen.y + e.target.y());
+                            const dxm = rawCad.x - midX;
+                            const dym = rawCad.y - midY;
+                            const axis: "h" | "v" = Math.abs(dxm) >= Math.abs(dym) ? "h" : "v";
+                            const snapDx = axis === "h" ? Math.round(dxm / 0.5) * 0.5 : 0;
+                            const snapDy = axis === "v" ? Math.round(dym / 0.5) * 0.5 : 0;
+                            const snappedMidScreen = screenFromCad(midX + snapDx, midY + snapDy);
+                            e.target.position({ x: snappedMidScreen.x - midScreen.x, y: snappedMidScreen.y - midScreen.y });
+                            setDragState(prev => prev ? { ...prev, currentX: midX + snapDx, currentY: midY + snapDy, axis } : null);
+                          }}
+                          onDragEnd={(e) => {
+                            if (dragState) {
+                              const midX = (ann.startX + ann.endX) / 2;
+                              const midY = (ann.startY + ann.endY) / 2;
+                              const deltaX = Math.round((dragState.currentX - midX) * 10) / 10;
+                              const deltaY = Math.round((dragState.currentY - midY) * 10) / 10;
+                              updateLoadAnnotation(activePanel.id, {
+                                ...ann,
+                                startX: ann.startX + deltaX,
+                                startY: ann.startY + deltaY,
+                                endX: ann.endX + deltaX,
+                                endY: ann.endY + deltaY,
+                              });
+                            }
+                            e.target.position({ x: 0, y: 0 });
+                            setDragState(null);
+                          }}
+                          onClick={(e) => { e.cancelBubble = true; setSelection({ kind: "loadAnnotation", id: ann.id }); }}
+                        >
                           {/* Connecting line along the tail ends of the arrows */}
                           {tailPoints.length >= 4 && (
                             <Line points={tailPoints} stroke={loadColor} strokeWidth={1.5} />
@@ -1473,12 +1513,27 @@ export default function PanelDesigner() {
                       const dir = ann.direction === "up" ? -1 : 1;
                       return (
                         <Group key={ann.id} x={s.x} y={s.y} draggable
+                          onDragStart={() => {
+                            setDragState({ elementType: "loadAnnotation", elementId: ann.id, originalX: ann.startX, originalY: ann.startY, currentX: ann.startX, currentY: ann.startY, axis: null });
+                          }}
+                          onDragMove={(e) => {
+                            const rawCad = cadFromScreen(e.target.x(), e.target.y());
+                            const dxm = rawCad.x - ann.startX;
+                            const dym = rawCad.y - ann.startY;
+                            const axis: "h" | "v" = Math.abs(dxm) >= Math.abs(dym) ? "h" : "v";
+                            const snX = axis === "h" ? ann.startX + Math.round(dxm / 0.5) * 0.5 : ann.startX;
+                            const snY = axis === "v" ? ann.startY + Math.round(dym / 0.5) * 0.5 : ann.startY;
+                            e.target.position(screenFromCad(snX, snY));
+                            setDragState(prev => prev ? { ...prev, currentX: snX, currentY: snY, axis } : null);
+                          }}
                           onDragEnd={(e) => {
-                            const newCad = cadFromScreen(e.target.x(), e.target.y());
-                            const snap = snapToPoint(newCad.x, newCad.y);
-                            const nx = snap.snapped ? snap.x : Math.round(newCad.x / 0.5) * 0.5;
-                            const ny = snap.snapped ? snap.y : Math.round(newCad.y / 0.5) * 0.5;
-                            updateLoadAnnotation(activePanel.id, { ...ann, startX: nx, startY: ny, endX: nx, endY: ny });
+                            if (dragState) {
+                              const fx = Math.round(dragState.currentX * 10) / 10;
+                              const fy = Math.round(dragState.currentY * 10) / 10;
+                              updateLoadAnnotation(activePanel.id, { ...ann, startX: fx, startY: fy, endX: fx, endY: fy });
+                            }
+                            e.target.position(screenFromCad(dragState?.currentX ?? ann.startX, dragState?.currentY ?? ann.startY));
+                            setDragState(null);
                           }}
                           onClick={(e) => { e.cancelBubble = true; setSelection({ kind: "loadAnnotation", id: ann.id }); }}
                         >
@@ -1493,12 +1548,27 @@ export default function PanelDesigner() {
                       const dir = ann.direction === "left" ? -1 : 1;
                       return (
                         <Group key={ann.id} x={s.x} y={s.y} draggable
+                          onDragStart={() => {
+                            setDragState({ elementType: "loadAnnotation", elementId: ann.id, originalX: ann.startX, originalY: ann.startY, currentX: ann.startX, currentY: ann.startY, axis: null });
+                          }}
+                          onDragMove={(e) => {
+                            const rawCad = cadFromScreen(e.target.x(), e.target.y());
+                            const dxm = rawCad.x - ann.startX;
+                            const dym = rawCad.y - ann.startY;
+                            const axis: "h" | "v" = Math.abs(dxm) >= Math.abs(dym) ? "h" : "v";
+                            const snX = axis === "h" ? ann.startX + Math.round(dxm / 0.5) * 0.5 : ann.startX;
+                            const snY = axis === "v" ? ann.startY + Math.round(dym / 0.5) * 0.5 : ann.startY;
+                            e.target.position(screenFromCad(snX, snY));
+                            setDragState(prev => prev ? { ...prev, currentX: snX, currentY: snY, axis } : null);
+                          }}
                           onDragEnd={(e) => {
-                            const newCad = cadFromScreen(e.target.x(), e.target.y());
-                            const snap = snapToPoint(newCad.x, newCad.y);
-                            const nx = snap.snapped ? snap.x : Math.round(newCad.x / 0.5) * 0.5;
-                            const ny = snap.snapped ? snap.y : Math.round(newCad.y / 0.5) * 0.5;
-                            updateLoadAnnotation(activePanel.id, { ...ann, startX: nx, startY: ny, endX: nx, endY: ny });
+                            if (dragState) {
+                              const fx = Math.round(dragState.currentX * 10) / 10;
+                              const fy = Math.round(dragState.currentY * 10) / 10;
+                              updateLoadAnnotation(activePanel.id, { ...ann, startX: fx, startY: fy, endX: fx, endY: fy });
+                            }
+                            e.target.position(screenFromCad(dragState?.currentX ?? ann.startX, dragState?.currentY ?? ann.startY));
+                            setDragState(null);
                           }}
                           onClick={(e) => { e.cancelBubble = true; setSelection({ kind: "loadAnnotation", id: ann.id }); }}
                         >
@@ -1519,12 +1589,27 @@ export default function PanelDesigner() {
                       const tipY = sign * arrowSize * zDirY;
                       return (
                         <Group key={ann.id} x={s.x} y={s.y} draggable
+                          onDragStart={() => {
+                            setDragState({ elementType: "loadAnnotation", elementId: ann.id, originalX: ann.startX, originalY: ann.startY, currentX: ann.startX, currentY: ann.startY, axis: null });
+                          }}
+                          onDragMove={(e) => {
+                            const rawCad = cadFromScreen(e.target.x(), e.target.y());
+                            const dxm = rawCad.x - ann.startX;
+                            const dym = rawCad.y - ann.startY;
+                            const axis: "h" | "v" = Math.abs(dxm) >= Math.abs(dym) ? "h" : "v";
+                            const snX = axis === "h" ? ann.startX + Math.round(dxm / 0.5) * 0.5 : ann.startX;
+                            const snY = axis === "v" ? ann.startY + Math.round(dym / 0.5) * 0.5 : ann.startY;
+                            e.target.position(screenFromCad(snX, snY));
+                            setDragState(prev => prev ? { ...prev, currentX: snX, currentY: snY, axis } : null);
+                          }}
                           onDragEnd={(e) => {
-                            const newCad = cadFromScreen(e.target.x(), e.target.y());
-                            const snap = snapToPoint(newCad.x, newCad.y);
-                            const nx = snap.snapped ? snap.x : Math.round(newCad.x / 0.5) * 0.5;
-                            const ny = snap.snapped ? snap.y : Math.round(newCad.y / 0.5) * 0.5;
-                            updateLoadAnnotation(activePanel.id, { ...ann, startX: nx, startY: ny, endX: nx, endY: ny });
+                            if (dragState) {
+                              const fx = Math.round(dragState.currentX * 10) / 10;
+                              const fy = Math.round(dragState.currentY * 10) / 10;
+                              updateLoadAnnotation(activePanel.id, { ...ann, startX: fx, startY: fy, endX: fx, endY: fy });
+                            }
+                            e.target.position(screenFromCad(dragState?.currentX ?? ann.startX, dragState?.currentY ?? ann.startY));
+                            setDragState(null);
                           }}
                           onClick={(e) => { e.cancelBubble = true; setSelection({ kind: "loadAnnotation", id: ann.id }); }}
                         >
