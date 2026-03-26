@@ -1787,70 +1787,86 @@ export default function PanelDesigner() {
                     const isTaSelected = selection?.kind === "textAnnotation" && selection.id === ta.id;
                     const borderColor = isTaSelected ? "#dc2626" : "#64748b";
                     return (
-                      <Group key={ta.id} x={tl.x} y={tl.y} draggable
-                        onDragStart={() => {
-                          setDragState({ elementType: "loadAnnotation", elementId: ta.id, originalX: ta.x, originalY: ta.y, currentX: ta.x, currentY: ta.y, axis: null });
-                        }}
-                        onDragMove={(e) => {
-                          const rawCad = cadFromScreen(tl.x + e.target.x(), tl.y + e.target.y());
-                          const newCadY = rawCad.y - ta.height; // bottom-left Y
-                          const dxm = rawCad.x - ta.x;
-                          const dym = newCadY - ta.y;
-                          const snX = ta.x + Math.round(dxm / 0.5) * 0.5;
-                          const snY = ta.y + Math.round(dym / 0.5) * 0.5;
-                          const snTl = screenFromCad(snX, snY + ta.height);
-                          e.target.position({ x: snTl.x - tl.x, y: snTl.y - tl.y });
-                          const axis: "h" | "v" = Math.abs(dxm) >= Math.abs(dym) ? "h" : "v";
-                          setDragState(prev => prev ? { ...prev, currentX: snX, currentY: snY, axis } : null);
-                        }}
-                        onDragEnd={(e) => {
-                          if (dragState) {
-                            updateTextAnnotation(activePanel.id, {
-                              ...ta,
-                              x: Math.round(dragState.currentX * 10) / 10,
-                              y: Math.round(dragState.currentY * 10) / 10,
-                            });
-                          }
-                          e.target.position({ x: 0, y: 0 });
-                          setDragState(null);
-                        }}
-                        onClick={(e) => { e.cancelBubble = true; setSelection({ kind: "textAnnotation", id: ta.id }); }}
-                      >
-                        {/* Background and border */}
-                        <Rect
-                          width={sw} height={sh}
-                          fill="rgba(255,255,255,0.85)"
-                          stroke={ta.showBorder || isTaSelected ? borderColor : "transparent"}
-                          strokeWidth={isTaSelected ? 2 : 1}
-                          dash={!ta.showBorder && isTaSelected ? [4, 3] : undefined}
-                        />
-                        {/* Text with word wrap */}
-                        <Text
-                          text={ta.text}
-                          x={4} y={3}
-                          width={sw - 8}
-                          fontSize={14}
-                          fill="#1e293b"
-                          wrap="word"
-                        />
-                        {/* Resize handle — only updates on drag end to avoid compounding */}
+                      <React.Fragment key={ta.id}>
+                        {/* Main text box group — draggable for moving */}
+                        <Group x={tl.x} y={tl.y} draggable
+                          onDragStart={() => {
+                            setDragState({ elementType: "loadAnnotation", elementId: ta.id, originalX: ta.x, originalY: ta.y, currentX: ta.x, currentY: ta.y, axis: null });
+                          }}
+                          onDragMove={(e) => {
+                            const rawCad = cadFromScreen(tl.x + e.target.x(), tl.y + e.target.y());
+                            const newCadY = rawCad.y - ta.height;
+                            const dxm = rawCad.x - ta.x;
+                            const dym = newCadY - ta.y;
+                            const snX = ta.x + Math.round(dxm / 0.5) * 0.5;
+                            const snY = ta.y + Math.round(dym / 0.5) * 0.5;
+                            const snTl = screenFromCad(snX, snY + ta.height);
+                            e.target.position({ x: snTl.x - tl.x, y: snTl.y - tl.y });
+                            const axis: "h" | "v" = Math.abs(dxm) >= Math.abs(dym) ? "h" : "v";
+                            setDragState(prev => prev ? { ...prev, currentX: snX, currentY: snY, axis } : null);
+                          }}
+                          onDragEnd={(e) => {
+                            if (dragState) {
+                              updateTextAnnotation(activePanel.id, {
+                                ...ta,
+                                x: Math.round(dragState.currentX * 10) / 10,
+                                y: Math.round(dragState.currentY * 10) / 10,
+                              });
+                            }
+                            e.target.position({ x: 0, y: 0 });
+                            setDragState(null);
+                          }}
+                          onClick={(e) => { e.cancelBubble = true; setSelection({ kind: "textAnnotation", id: ta.id }); }}
+                        >
+                          <Rect
+                            width={sw} height={sh}
+                            fill="rgba(255,255,255,0.85)"
+                            stroke={ta.showBorder || isTaSelected ? borderColor : "transparent"}
+                            strokeWidth={isTaSelected ? 2 : 1}
+                            dash={!ta.showBorder && isTaSelected ? [4, 3] : undefined}
+                          />
+                          <Text
+                            text={ta.text}
+                            x={4} y={3}
+                            width={sw - 8}
+                            fontSize={14}
+                            fill="#1e293b"
+                            wrap="word"
+                          />
+                        </Group>
+                        {/* Resize handle — separate from parent Group so dragging it doesn't move the box */}
                         {isTaSelected && (
                           <Rect
-                            x={sw - 10} y={sh - 10}
-                            width={10} height={10}
+                            x={tl.x + sw - 6} y={tl.y + sh - 6}
+                            width={12} height={12}
                             fill="#dc2626" opacity={0.7}
+                            cornerRadius={2}
                             draggable
+                            onDragMove={(e) => {
+                              // Clamp: compute new size from handle position relative to text box top-left
+                              const handleX = e.target.x() + 6; // center of handle
+                              const handleY = e.target.y() + 6;
+                              const newScreenW = Math.max(30, handleX - tl.x);
+                              const newScreenH = Math.max(30, handleY - tl.y);
+                              const newW = Math.max(6, Math.round((newScreenW / scale) / 0.5) * 0.5);
+                              const newH = Math.max(6, Math.round((newScreenH / scale) / 0.5) * 0.5);
+                              // Snap handle to the computed grid position
+                              const snappedX = tl.x + newW * scale - 6;
+                              const snappedY = tl.y + newH * scale - 6;
+                              e.target.position({ x: snappedX, y: snappedY });
+                            }}
                             onDragEnd={(e) => {
-                              const deltaScreenX = e.target.x();
-                              const deltaScreenY = e.target.y();
-                              const newW = Math.max(6, Math.round(((sw + deltaScreenX) / scale) / 0.5) * 0.5);
-                              const newH = Math.max(6, Math.round(((sh + deltaScreenY) / scale) / 0.5) * 0.5);
+                              const handleX = e.target.x() + 6;
+                              const handleY = e.target.y() + 6;
+                              const newScreenW = Math.max(30, handleX - tl.x);
+                              const newScreenH = Math.max(30, handleY - tl.y);
+                              const newW = Math.max(6, Math.round((newScreenW / scale) / 0.5) * 0.5);
+                              const newH = Math.max(6, Math.round((newScreenH / scale) / 0.5) * 0.5);
                               updateTextAnnotation(activePanel.id, { ...ta, width: newW, height: newH });
-                              e.target.position({ x: 0, y: 0 });
                             }}
                           />
                         )}
-                      </Group>
+                      </React.Fragment>
                     );
                   })}
 
