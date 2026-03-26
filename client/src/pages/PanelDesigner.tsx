@@ -1411,11 +1411,11 @@ export default function PanelDesigner() {
                       } else if (lineDir === "down") {
                         ax = 0; ay = 1;
                       } else if (lineDir === "negative") {
-                        // Negative = away from panel (toward viewer) = up-right
-                        ax = 0.7; ay = -0.7;
-                      } else {
-                        // Positive = toward panel (away from viewer) = down-left
+                        // Negative = away from panel (-Z) = down-left
                         ax = -0.7; ay = 0.7;
+                      } else {
+                        // Positive = toward panel face (+Z) = up-right
+                        ax = 0.7; ay = -0.7;
                       }
 
                       const arrowLen = 18;
@@ -1494,11 +1494,11 @@ export default function PanelDesigner() {
                     }
 
                     if (ann.type === "point_out_of_plane") {
-                      // Foreshortened arrow at ~45deg angle representing Z axis
+                      // Foreshortened arrow at ~45deg angle along Z axis
                       const zDirX = 0.7;  // screen-space Z direction (up-right)
                       const zDirY = -0.7;
-                      // Positive = toward panel (down-left), Negative = away from panel (up-right)
-                      const sign = ann.direction === "positive" ? -1 : 1;
+                      // Positive = toward panel face (along +Z), Negative = away from panel (-Z)
+                      const sign = ann.direction === "negative" ? -1 : 1;
                       const tipX = sign * arrowSize * zDirX;
                       const tipY = sign * arrowSize * zDirY;
                       return (
