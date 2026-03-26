@@ -638,6 +638,28 @@ export default function PanelDesigner() {
               endY: Math.round((ann.endY + dy) * 10) / 10,
             });
           }
+        } else if (sel.kind === "userLine") {
+          const line = panel.userLines?.find(l => l.id === sel.id);
+          if (line) {
+            updateUserLine(panel.id, {
+              ...line,
+              x1: Math.round((line.x1 + dx) * 10) / 10,
+              y1: Math.round((line.y1 + dy) * 10) / 10,
+              x2: Math.round((line.x2 + dx) * 10) / 10,
+              y2: Math.round((line.y2 + dy) * 10) / 10,
+            });
+          }
+        } else if (sel.kind === "dimension") {
+          const dim = panel.dimensions?.find(d => d.id === sel.id);
+          if (dim) {
+            updateDimension(panel.id, {
+              ...dim,
+              startX: Math.round((dim.startX + dx) * 10) / 10,
+              startY: Math.round((dim.startY + dy) * 10) / 10,
+              endX: Math.round((dim.endX + dx) * 10) / 10,
+              endY: Math.round((dim.endY + dy) * 10) / 10,
+            });
+          }
         }
       }
     };
@@ -1401,7 +1423,43 @@ export default function PanelDesigner() {
                     const isLineSelected = selection?.kind === "userLine" && selection.id === line.id;
                     const lineColor = isLineSelected ? "#dc2626" : "#334155";
                     return (
-                      <Group key={line.id} onClick={(e) => { e.cancelBubble = true; setSelection({ kind: "userLine", id: line.id }); }}>
+                      <Group key={line.id} draggable
+                        onDragStart={() => {
+                          const midX = (line.x1 + line.x2) / 2;
+                          const midY = (line.y1 + line.y2) / 2;
+                          setDragState({ elementType: "loadAnnotation", elementId: line.id, originalX: midX, originalY: midY, currentX: midX, currentY: midY, axis: null });
+                        }}
+                        onDragMove={(e) => {
+                          const midX = (line.x1 + line.x2) / 2;
+                          const midY = (line.y1 + line.y2) / 2;
+                          const midScreen = screenFromCad(midX, midY);
+                          const rawCad = cadFromScreen(midScreen.x + e.target.x(), midScreen.y + e.target.y());
+                          const dxm = rawCad.x - midX;
+                          const dym = rawCad.y - midY;
+                          const axis: "h" | "v" = Math.abs(dxm) >= Math.abs(dym) ? "h" : "v";
+                          const snapDx = axis === "h" ? Math.round(dxm / 0.5) * 0.5 : 0;
+                          const snapDy = axis === "v" ? Math.round(dym / 0.5) * 0.5 : 0;
+                          const snappedMidScreen = screenFromCad(midX + snapDx, midY + snapDy);
+                          e.target.position({ x: snappedMidScreen.x - midScreen.x, y: snappedMidScreen.y - midScreen.y });
+                          setDragState(prev => prev ? { ...prev, currentX: midX + snapDx, currentY: midY + snapDy, axis } : null);
+                        }}
+                        onDragEnd={(e) => {
+                          if (dragState) {
+                            const midX = (line.x1 + line.x2) / 2;
+                            const midY = (line.y1 + line.y2) / 2;
+                            const deltaX = Math.round((dragState.currentX - midX) * 10) / 10;
+                            const deltaY = Math.round((dragState.currentY - midY) * 10) / 10;
+                            updateUserLine(activePanel.id, {
+                              ...line,
+                              x1: line.x1 + deltaX, y1: line.y1 + deltaY,
+                              x2: line.x2 + deltaX, y2: line.y2 + deltaY,
+                            });
+                          }
+                          e.target.position({ x: 0, y: 0 });
+                          setDragState(null);
+                        }}
+                        onClick={(e) => { e.cancelBubble = true; setSelection({ kind: "userLine", id: line.id }); }}
+                      >
                         <Line
                           points={[s1.x, s1.y, s2.x, s2.y]}
                           stroke={lineColor}
