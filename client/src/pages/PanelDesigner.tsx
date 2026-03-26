@@ -756,57 +756,78 @@ export default function PanelDesigner() {
   }, [selection]);
   const isCentroidSelected = selection?.kind === "centroid";
 
-  const renderConnectionMarker = (c: ConnectionNode, isSelected: boolean) => {
+  const renderConnectionMarker = (c: ConnectionNode, isSelected: boolean, isMultiSelected: boolean) => {
     const markerType = c.marker || "diamond";
     const fill = isSelected ? "#dc2626" : "#22c55e";
     const stroke = isSelected ? "#991b1b" : "#15803d";
+    // Multi-selected connections get a blue highlight ring to distinguish from single-select (red)
+    const multiRingColor = "#3b82f6";
     const size = 16;
 
-    switch (markerType) {
-      case "triangle-down":
-        return (
-          <RegularPolygon
-            sides={3}
-            radius={size}
-            fill={fill}
-            stroke={stroke}
-            strokeWidth={1}
-            rotation={180}
-          />
-        );
-      case "circle":
-        return (
-          <Circle
-            radius={size - 1}
-            fill={fill}
-            stroke={stroke}
-            strokeWidth={1}
-          />
-        );
-      case "square":
-        return (
-          <Rect
-            x={-size + 1}
-            y={-size + 1}
-            width={(size - 1) * 2}
-            height={(size - 1) * 2}
-            fill={fill}
-            stroke={stroke}
-            strokeWidth={1}
-          />
-        );
-      case "diamond":
-      default:
-        return (
-          <Rect
-            x={-12} y={-12} width={24} height={24}
-            fill={fill}
-            stroke={stroke}
-            strokeWidth={1}
-            rotation={45}
-          />
-        );
-    }
+    const markerShape = (() => {
+      switch (markerType) {
+        case "triangle-down":
+          return (
+            <RegularPolygon
+              sides={3}
+              radius={size}
+              fill={fill}
+              stroke={stroke}
+              strokeWidth={1}
+              rotation={180}
+            />
+          );
+        case "circle":
+          return (
+            <Circle
+              radius={size - 1}
+              fill={fill}
+              stroke={stroke}
+              strokeWidth={1}
+            />
+          );
+        case "square":
+          return (
+            <Rect
+              x={-size + 1}
+              y={-size + 1}
+              width={(size - 1) * 2}
+              height={(size - 1) * 2}
+              fill={fill}
+              stroke={stroke}
+              strokeWidth={1}
+            />
+          );
+        case "diamond":
+        default:
+          return (
+            <Rect
+              x={-12} y={-12} width={24} height={24}
+              fill={fill}
+              stroke={stroke}
+              strokeWidth={1}
+              rotation={45}
+            />
+          );
+      }
+    })();
+
+    if (!isMultiSelected) return markerShape;
+
+    // Wrap in a Konva Group to hold both the ring and the marker shape
+    // (React fragments are not supported by react-konva)
+    return (
+      <Group>
+        <Circle
+          radius={size + 6}
+          fill="transparent"
+          stroke={multiRingColor}
+          strokeWidth={2.5}
+          dash={[6, 3]}
+        />
+        {markerShape}
+      </Group>
+    );
   };
 
   return (
