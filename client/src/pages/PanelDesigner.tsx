@@ -651,7 +651,6 @@ export default function PanelDesigner() {
             });
           }
         } else if (sel.kind === "connections") {
-          // Nudge all selected connections together
           sel.ids.forEach(id => {
             const conn = panel.connections.find(c => c.id === id);
             if (conn) {
@@ -750,7 +749,6 @@ export default function PanelDesigner() {
     }
   }
 
-  // Derive set of selected connection IDs (works for both single and multi-select)
   const selectedConnectionIds: Set<string> = useMemo(() => {
     if (selection?.kind === "connection") return new Set([selection.id]);
     if (selection?.kind === "connections") return selection.ids;
@@ -1449,7 +1447,6 @@ export default function PanelDesigner() {
                         key={c.id}
                         x={s.x}
                         y={s.y}
-                        // Disable drag when multiple connections are selected to avoid partial moves
                         draggable={selectedConnectionIds.size <= 1}
                         onDragStart={() => {
                           setDragState({
@@ -1509,7 +1506,6 @@ export default function PanelDesigner() {
                           e.cancelBubble = true;
                           const nativeEvt = e.evt as MouseEvent;
                           if (nativeEvt.shiftKey) {
-                            // Shift+click: toggle this connection in the multi-selection
                             const current = new Set(selectedConnectionIds);
                             if (current.has(c.id)) {
                               current.delete(c.id);
@@ -1525,12 +1521,20 @@ export default function PanelDesigner() {
                               setSelection({ kind: "connections", ids: current });
                             }
                           } else {
-                            // Normal click: single select
                             setSelection({ kind: "connection", id: c.id });
                           }
                         }}
                       >
-                        {renderConnectionMarker(c, isSelected, isMultiSelected)}
+                        {isMultiSelected && (
+                          <Circle
+                            radius={22}
+                            fill="transparent"
+                            stroke="#3b82f6"
+                            strokeWidth={2.5}
+                            dash={[6, 3]}
+                          />
+                        )}
+                        {renderConnectionMarker(c, isSelected)}
                         <Text text={c.label} x={10} y={-16} fontSize={14} fontStyle="bold" fill="#1e293b" />
                         <Text text={`(${c.x.toFixed(1)}, ${c.y.toFixed(1)})`} x={10} y={2} fontSize={12} fill="#64748b" />
                       </Group>
@@ -2947,19 +2951,17 @@ function MultiConnectionProperties({ panelId, connectionIds, onDeselect }: { pan
     E: "Seismic",
   };
 
-  // Helper: compute a shared value across all selected connections, or undefined if they differ
-  function sharedValue<T>(getter: (c: ConnectionNode) => T): T | undefined {
+  function getSharedValue<T>(getter: (c: ConnectionNode) => T): T | undefined {
     const first = getter(connections[0]);
     return connections.every(c => getter(c) === first) ? first : undefined;
   }
 
-  const sharedLabel = sharedValue(c => c.label);
-  const sharedType = sharedValue(c => c.type);
-  const sharedMarker = sharedValue(c => c.marker || "diamond");
-  const sharedX = sharedValue(c => c.x);
-  const sharedY = sharedValue(c => c.y);
+  const sharedLabel = getSharedValue(c => c.label);
+  const sharedType = getSharedValue(c => c.type);
+  const sharedMarker = getSharedValue(c => c.marker || "diamond");
+  const sharedX = getSharedValue(c => c.x);
+  const sharedY = getSharedValue(c => c.y);
 
-  // Apply a partial update to all selected connections
   const updateAll = (updater: (c: ConnectionNode) => ConnectionNode) => {
     connections.forEach(c => updateConnection(panelId, updater(c)));
   };
@@ -3065,7 +3067,6 @@ function MultiConnectionProperties({ panelId, connectionIds, onDeselect }: { pan
         <TabsContent value="forces" className="p-4 m-0">
           <div className="space-y-4">
             {(["D", "W", "E", "L"] as const).map(caseKey => {
-              // For each force axis, check if all selected connections share the same value
               const sharedForces: Record<string, number | undefined> = {};
               for (const axis of ["x", "y", "z"] as const) {
                 const first = (connections[0].forces[caseKey] || { x: 0, y: 0, z: 0 })[axis];
