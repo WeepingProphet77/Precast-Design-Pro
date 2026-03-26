@@ -91,6 +91,7 @@ export interface Panel {
   dimensions?: DimensionAnnotation[];
   userLines?: UserDrawnLine[];
   loadAnnotations?: LoadAnnotation[];
+  textAnnotations?: TextAnnotation[];
   importedNodes?: { x: number; y: number }[];
   dxfViews?: DxfView[];
 }
@@ -148,6 +149,16 @@ export interface LoadAnnotation {
   // For point loads: direction
   direction?: "up" | "down" | "left" | "right" | "positive" | "negative";
   label: string;
+}
+
+export interface TextAnnotation {
+  id: string;
+  x: number;
+  y: number;
+  width: number;   // CAD units (inches)
+  height: number;  // CAD units (inches)
+  text: string;
+  showBorder: boolean;
 }
 
 export interface ConnectionCapacity {
