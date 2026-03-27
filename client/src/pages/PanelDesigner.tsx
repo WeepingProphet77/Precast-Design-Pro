@@ -2780,8 +2780,19 @@ function ConnectionProperties({ panelId, connectionId, onDeselect }: { panelId: 
   const loadLabels: Record<string, string> = {
     D: "Dead",
     L: "Live",
-    W: "Wind",
-    E: "Seismic",
+    W: "Wind (+)",
+    Wneg: "Wind (-)",
+    E: "Seismic (+)",
+    Eneg: "Seismic (-)",
+  };
+
+  const loadBadgeLabels: Record<string, string> = {
+    D: "D",
+    L: "L",
+    W: "W+",
+    Wneg: "W-",
+    E: "E+",
+    Eneg: "E-",
   };
 
   return (
@@ -2871,34 +2882,57 @@ function ConnectionProperties({ panelId, connectionId, onDeselect }: { panelId: 
       <ScrollArea className="flex-1">
         <TabsContent value="forces" className="p-4 m-0">
           <div className="space-y-4">
-            {(["D", "W", "E", "L"] as const).map(caseKey => {
+            {(["D", "L", "W", "Wneg", "E", "Eneg"] as const).map(caseKey => {
               const forces = connection.forces[caseKey] || { x: 0, y: 0, z: 0 };
+              const isNegCase = caseKey === "Wneg" || caseKey === "Eneg";
+              const parentKey = caseKey === "Wneg" ? "W" : caseKey === "Eneg" ? "E" : null;
+              const parentForces = parentKey ? (connection.forces[parentKey] || { x: 0, y: 0, z: 0 }) : null;
+              const hasOverride = isNegCase && connection.forces[caseKey];
               return (
-                <div key={caseKey} className="space-y-2 p-3 bg-muted/20 rounded border border-border/50">
+                <div key={caseKey} className={`space-y-2 p-3 rounded border ${isNegCase ? "bg-orange-50/50 border-orange-200/50" : "bg-muted/20 border-border/50"}`}>
                   <div className="flex items-center gap-2 mb-1">
-                    <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-bold text-primary">{caseKey}</div>
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${isNegCase ? "bg-orange-100 text-orange-700" : "bg-primary/10 text-primary"}`}>{loadBadgeLabels[caseKey]}</div>
                     <span className="text-xs font-bold uppercase tracking-wider">{loadLabels[caseKey]}</span>
+                    {isNegCase && !hasOverride && (
+                      <span className="text-[9px] text-muted-foreground ml-auto">(auto-negated from {parentKey})</span>
+                    )}
                   </div>
                   <div className="grid grid-cols-3 gap-2">
-                    {["x", "y", "z"].map(axis => (
-                      <div key={axis} className="space-y-1">
-                        <Label className="text-[10px] uppercase">F{axis}</Label>
-                        <Input
-                          type="number"
-                          className="h-7 text-xs font-mono"
-                          value={forces[axis as keyof typeof forces]}
-                          onChange={e => {
-                            const val = Number(e.target.value);
-                            updateConnection(panelId, {
-                              ...connection,
-                              forces: { ...connection.forces, [caseKey]: { ...forces, [axis]: val } },
-                            });
-                          }}
-                          data-testid={`input-force-${caseKey}-${axis}`}
-                        />
-                      </div>
-                    ))}
+                    {["x", "y", "z"].map(axis => {
+                      const displayVal = isNegCase && !hasOverride && parentForces
+                        ? -(parentForces as any)[axis]
+                        : (forces as any)[axis];
+                      return (
+                        <div key={axis} className="space-y-1">
+                          <Label className="text-[10px] uppercase">F{axis}</Label>
+                          <Input
+                            type="number"
+                            className={`h-7 text-xs font-mono ${isNegCase && !hasOverride ? "text-muted-foreground" : ""}`}
+                            value={displayVal}
+                            onChange={e => {
+                              const val = Number(e.target.value);
+                              updateConnection(panelId, {
+                                ...connection,
+                                forces: { ...connection.forces, [caseKey]: { ...(connection.forces[caseKey] || { x: 0, y: 0, z: 0 }), [axis]: val } },
+                              });
+                            }}
+                            data-testid={`input-force-${caseKey}-${axis}`}
+                          />
+                        </div>
+                      );
+                    })}
                   </div>
+                  {isNegCase && hasOverride && (
+                    <button
+                      className="text-[9px] text-orange-600 hover:underline"
+                      onClick={() => {
+                        const { [caseKey]: _, ...rest } = connection.forces as any;
+                        updateConnection(panelId, { ...connection, forces: rest });
+                      }}
+                    >
+                      Reset to auto-negate
+                    </button>
+                  )}
                 </div>
               );
             })}
@@ -2953,8 +2987,19 @@ function MultiConnectionProperties({ panelId, connectionIds, onDeselect }: { pan
   const loadLabels: Record<string, string> = {
     D: "Dead",
     L: "Live",
-    W: "Wind",
-    E: "Seismic",
+    W: "Wind (+)",
+    Wneg: "Wind (-)",
+    E: "Seismic (+)",
+    Eneg: "Seismic (-)",
+  };
+
+  const loadBadgeLabels: Record<string, string> = {
+    D: "D",
+    L: "L",
+    W: "W+",
+    Wneg: "W-",
+    E: "E+",
+    Eneg: "E-",
   };
 
   function getSharedValue<T>(getter: (c: ConnectionNode) => T): T | undefined {
@@ -3072,21 +3117,27 @@ function MultiConnectionProperties({ panelId, connectionIds, onDeselect }: { pan
       <ScrollArea className="flex-1">
         <TabsContent value="forces" className="p-4 m-0">
           <div className="space-y-4">
-            {(["D", "W", "E", "L"] as const).map(caseKey => {
+            {(["D", "L", "W", "Wneg", "E", "Eneg"] as const).map(caseKey => {
+              const isNegCase = caseKey === "Wneg" || caseKey === "Eneg";
               const sharedForces: Record<string, number | undefined> = {};
               for (const axis of ["x", "y", "z"] as const) {
-                const first = (connections[0].forces[caseKey] || { x: 0, y: 0, z: 0 })[axis];
-                const allSame = connections.every(c => {
-                  const f = c.forces[caseKey] || { x: 0, y: 0, z: 0 };
-                  return f[axis] === first;
-                });
+                const getVal = (c: ConnectionNode) => {
+                  if (isNegCase && !c.forces[caseKey]) {
+                    const parentKey = caseKey === "Wneg" ? "W" : "E";
+                    const pf = c.forces[parentKey] || { x: 0, y: 0, z: 0 };
+                    return -(pf as any)[axis];
+                  }
+                  return ((c.forces as any)[caseKey] || { x: 0, y: 0, z: 0 })[axis];
+                };
+                const first = getVal(connections[0]);
+                const allSame = connections.every(c => getVal(c) === first);
                 sharedForces[axis] = allSame ? first : undefined;
               }
 
               return (
-                <div key={caseKey} className="space-y-2 p-3 bg-muted/20 rounded border border-border/50">
+                <div key={caseKey} className={`space-y-2 p-3 rounded border ${isNegCase ? "bg-orange-50/50 border-orange-200/50" : "bg-muted/20 border-border/50"}`}>
                   <div className="flex items-center gap-2 mb-1">
-                    <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-bold text-primary">{caseKey}</div>
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${isNegCase ? "bg-orange-100 text-orange-700" : "bg-primary/10 text-primary"}`}>{loadBadgeLabels[caseKey]}</div>
                     <span className="text-xs font-bold uppercase tracking-wider">{loadLabels[caseKey]}</span>
                   </div>
                   <div className="grid grid-cols-3 gap-2">
@@ -3104,7 +3155,7 @@ function MultiConnectionProperties({ panelId, connectionIds, onDeselect }: { pan
                               ...c,
                               forces: {
                                 ...c.forces,
-                                [caseKey]: { ...(c.forces[caseKey] || { x: 0, y: 0, z: 0 }), [axis]: val },
+                                [caseKey]: { ...((c.forces as any)[caseKey] || { x: 0, y: 0, z: 0 }), [axis]: val },
                               },
                             }));
                           }}

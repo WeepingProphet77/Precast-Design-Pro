@@ -2,7 +2,7 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { ProjectData, Panel, ConnectionNode, DimensionAnnotation, UserDrawnLine, LoadAnnotation, TextAnnotation } from "./types";
-import { calculateLoadCombinations } from "./calculations";
+import { calculateLoadCombinations, calculateDirectionalResult } from "./calculations";
 
 const MARGIN = 20;
 const PAGE_W = 612;
@@ -142,20 +142,25 @@ function generateProjectDataSheet(doc: jsPDF, project: ProjectData) {
     ? [
         "  1.  D",
         "  2.  D + L",
-        "  3.  D + 0.75L + 0.75(0.6W)",
-        "  4.  D + 0.6W",
-        "  5.  0.6D + 0.6W",
-        "  6.  D + 0.7E",
-        "  7.  D + 0.75L + 0.75(0.7E)",
-        "  8.  0.6D + 0.7E",
+        "  3.  D + 0.75L + 0.75(0.6W)  [W+/W-]",
+        "  4.  D + 0.6W  [W+/W-]",
+        "  5.  0.6D + 0.6W  [W+/W-]",
+        "  6.  D + 0.7E  [E+/E-]",
+        "  7.  D + 0.75L + 0.75(0.7E)  [E+/E-]",
+        "  8.  0.6D + 0.7E  [E+/E-]",
+        "",
+        "  W+/W- and E+/E- indicate evaluation in both positive and negative directions.",
       ]
     : [
         "  1.  1.4D",
-        "  2.  1.2D + 1.6L",
-        "  3.  1.2D + 1.0W + 1.0L",
-        "  4.  0.9D + 1.0W",
-        "  5.  1.2D + 1.0E + 1.0L",
-        "  6.  0.9D + 1.0E",
+        "  2.  1.2D + 1.6L + 0.5(Lr or S or R)",
+        "  3.  1.2D + 1.6(Lr or S or R) + (L or 0.5W)  [W+/W-]",
+        "  4.  1.2D + 1.0W + L + 0.5(Lr or S or R)  [W+/W-]",
+        "  5.  1.2D + 1.0E + L + 0.2S  [E+/E-]",
+        "  6.  0.9D + 1.0W  [W+/W-]",
+        "  7.  0.9D + 1.0E  [E+/E-]",
+        "",
+        "  W+/W- and E+/E- indicate evaluation in both positive and negative directions.",
       ];
   [...designBasis, ...combos].forEach(line => {
     doc.text(line, MARGIN + 6, y);
@@ -750,32 +755,27 @@ function generatePanelPage(doc: jsPDF, project: ProjectData, panel: Panel) {
     autoTable(doc, {
       startY: y,
       margin: { left: MARGIN, right: MARGIN },
-      head: [["Conn.", "Type", "Marker", "X", "Y", "Dx", "Dy", "Dz", "Lx", "Ly", "Lz", "Wx", "Wy", "Wz", "Ex", "Ey", "Ez"]],
+      head: [["Conn.", "Type", "Dx", "Dy", "Dz", "Lx", "Ly", "Lz", "W+x", "W+y", "W+z", "W-x", "W-y", "W-z", "E+x", "E+y", "E+z", "E-x", "E-y", "E-z"]],
       body: panel.connections.map(c => {
         const D = c.forces.D || { x: 0, y: 0, z: 0 };
         const L = c.forces.L || { x: 0, y: 0, z: 0 };
         const W = c.forces.W || { x: 0, y: 0, z: 0 };
         const E = c.forces.E || { x: 0, y: 0, z: 0 };
-        const markerLabels: Record<string, string> = {
-          "triangle-down": "Bearing",
-          "circle": "Tieback",
-          "square": "Lateral",
-          "diamond": "P-to-P",
-        };
+        const Wneg = c.forces.Wneg || { x: -W.x, y: -W.y, z: -W.z };
+        const Eneg = c.forces.Eneg || { x: -E.x, y: -E.y, z: -E.z };
         return [
           c.label,
           c.type,
-          markerLabels[c.marker] || c.marker,
-          c.x.toFixed(1),
-          c.y.toFixed(1),
           String(D.x), String(D.y), String(D.z),
           String(L.x), String(L.y), String(L.z),
           String(W.x), String(W.y), String(W.z),
+          String(Wneg.x), String(Wneg.y), String(Wneg.z),
           String(E.x), String(E.y), String(E.z),
+          String(Eneg.x), String(Eneg.y), String(Eneg.z),
         ];
       }),
-      styles: { fontSize: 6, cellPadding: 2, textColor: COLORS.text, halign: "center" },
-      headStyles: { fillColor: COLORS.accent, textColor: [255, 255, 255], fontStyle: "bold", fontSize: 6 },
+      styles: { fontSize: 5, cellPadding: 1.5, textColor: COLORS.text, halign: "center" },
+      headStyles: { fillColor: COLORS.accent, textColor: [255, 255, 255], fontStyle: "bold", fontSize: 5 },
       alternateRowStyles: { fillColor: COLORS.lightGray },
       columnStyles: {
         0: { halign: "left", fontStyle: "bold" },
@@ -947,21 +947,32 @@ function generateCapacityTable(doc: jsPDF, project: ProjectData) {
     autoTable(doc, {
       startY: y,
       margin: { left: MARGIN, right: MARGIN },
-      head: [["Connection Type", "Capacity X (lbs)", "Capacity Y (lbs)", "Capacity Z (lbs)"]],
+      head: [[
+        "Type",
+        "+X Right", "-X Left",
+        "+Y Comp.", "-Y Tension",
+        "+Z Press.", "-Z Suction",
+      ]],
       body: project.capacities.map(c => [
         `Type ${c.type}`,
-        c.capacityX.toLocaleString(),
-        c.capacityY.toLocaleString(),
-        c.capacityZ.toLocaleString(),
+        (c.capacityXPositive ?? c.capacityX).toLocaleString(),
+        (c.capacityXNegative ?? c.capacityX).toLocaleString(),
+        (c.capacityYPositive ?? c.capacityY).toLocaleString(),
+        (c.capacityYNegative ?? c.capacityY).toLocaleString(),
+        (c.capacityZPositive ?? c.capacityZ).toLocaleString(),
+        (c.capacityZNegative ?? c.capacityZ).toLocaleString(),
       ]),
-      styles: { fontSize: 9, cellPadding: 6, textColor: COLORS.text },
-      headStyles: { fillColor: COLORS.accent, textColor: [255, 255, 255], fontStyle: "bold", fontSize: 9 },
+      styles: { fontSize: 8, cellPadding: 4, textColor: COLORS.text },
+      headStyles: { fillColor: COLORS.accent, textColor: [255, 255, 255], fontStyle: "bold", fontSize: 7 },
       alternateRowStyles: { fillColor: COLORS.lightGray },
       columnStyles: {
         0: { fontStyle: "bold" },
         1: { halign: "right" },
         2: { halign: "right" },
         3: { halign: "right" },
+        4: { halign: "right" },
+        5: { halign: "right" },
+        6: { halign: "right" },
       },
     });
 
@@ -988,6 +999,103 @@ function generateCapacityTable(doc: jsPDF, project: ProjectData) {
   }
 }
 
+function formatDcrPdf(dcr: number): string {
+  if (!isFinite(dcr)) return "O/S";
+  return (dcr * 100).toFixed(1) + "%";
+}
+
+function generateDirectionalDemandPage(doc: jsPDF, project: ProjectData) {
+  doc.addPage();
+  drawHeader(doc, project);
+
+  let y = 56;
+  doc.setFontSize(16);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(...COLORS.primary);
+  doc.text("Directional Demand Summary", MARGIN, y);
+  y += 6;
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(...COLORS.muted);
+  doc.text("Maximum positive and negative demands per axis with controlling load combination and DCR", MARGIN, y + 10);
+  y += 24;
+
+  const allData: string[][] = [];
+  project.panels.forEach(panel => {
+    panel.connections.forEach(conn => {
+      const capacity = project.capacities.find(c => c.type === conn.type);
+      if (!capacity) return;
+      const result = calculateDirectionalResult(conn, capacity, project.info.designMethod, project.info.designStandard);
+      allData.push([
+        panel.name,
+        conn.label,
+        conn.type,
+        String(result.xPositive.demand), result.xPositive.controllingCombo, formatDcrPdf(result.xPositive.dcr),
+        String(result.xNegative.demand), result.xNegative.controllingCombo, formatDcrPdf(result.xNegative.dcr),
+        String(result.yPositive.demand), result.yPositive.controllingCombo, formatDcrPdf(result.yPositive.dcr),
+        String(result.yNegative.demand), result.yNegative.controllingCombo, formatDcrPdf(result.yNegative.dcr),
+        String(result.zPositive.demand), result.zPositive.controllingCombo, formatDcrPdf(result.zPositive.dcr),
+        String(result.zNegative.demand), result.zNegative.controllingCombo, formatDcrPdf(result.zNegative.dcr),
+      ]);
+    });
+  });
+
+  if (allData.length > 0) {
+    autoTable(doc, {
+      startY: y,
+      margin: { left: MARGIN, right: MARGIN },
+      head: [[
+        "Panel", "Conn.", "Type",
+        "+X", "+X Combo", "+X DCR",
+        "-X", "-X Combo", "-X DCR",
+        "+Y", "+Y Combo", "+Y DCR",
+        "-Y", "-Y Combo", "-Y DCR",
+        "+Z", "+Z Combo", "+Z DCR",
+        "-Z", "-Z Combo", "-Z DCR",
+      ]],
+      body: allData,
+      styles: { fontSize: 4.5, cellPadding: 1.5, textColor: COLORS.text, overflow: "ellipsize" },
+      headStyles: { fillColor: COLORS.accent, textColor: [255, 255, 255], fontStyle: "bold", fontSize: 4.5 },
+      alternateRowStyles: { fillColor: COLORS.lightGray },
+      columnStyles: {
+        0: { fontStyle: "bold" },
+        3: { halign: "right" },
+        5: { halign: "right" },
+        6: { halign: "right" },
+        8: { halign: "right" },
+        9: { halign: "right" },
+        11: { halign: "right" },
+        12: { halign: "right" },
+        14: { halign: "right" },
+        15: { halign: "right" },
+        17: { halign: "right" },
+        18: { halign: "right" },
+        20: { halign: "right" },
+      },
+      didParseCell: (data: any) => {
+        // Color DCR columns
+        if ([5, 8, 11, 14, 17, 20].includes(data.column.index) && data.section === "body") {
+          const val = parseFloat(data.cell.raw);
+          if (!isNaN(val)) {
+            if (val > 100) data.cell.styles.textColor = COLORS.danger;
+            else if (val > 90) data.cell.styles.textColor = COLORS.warning;
+            else data.cell.styles.textColor = COLORS.success;
+            data.cell.styles.fontStyle = "bold";
+          }
+          if (data.cell.raw === "O/S") {
+            data.cell.styles.textColor = COLORS.danger;
+            data.cell.styles.fontStyle = "bold";
+          }
+        }
+      },
+    });
+  } else {
+    doc.setFontSize(9);
+    doc.setTextColor(...COLORS.muted);
+    doc.text("No connections with capacity types found.", MARGIN + 6, y + 14);
+  }
+}
+
 export function exportProjectToPDF(project: ProjectData) {
   const doc = new jsPDF({ unit: "pt", format: "letter" });
 
@@ -998,6 +1106,7 @@ export function exportProjectToPDF(project: ProjectData) {
   });
 
   generateMasterSpreadsheet(doc, project);
+  generateDirectionalDemandPage(doc, project);
   generateCapacityTable(doc, project);
 
   const totalPages = doc.getNumberOfPages();
