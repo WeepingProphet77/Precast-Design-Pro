@@ -42,6 +42,28 @@ function circleArea(r: number): number {
   return Math.PI * r * r;
 }
 
+export function calculateNetArea(
+  perimeter: Vertex[],
+  openings: Opening[]
+): number {
+  if (perimeter.length < 3) return 0;
+
+  const perimPts = perimeter.map(v => ({ x: v.x, y: v.y }));
+  let totalArea = Math.abs(polygonSignedArea(perimPts));
+
+  for (const op of openings) {
+    if (op.type === "polygon" && op.vertices && op.vertices.length >= 3) {
+      totalArea -= Math.abs(polygonSignedArea(op.vertices));
+    } else if (op.type === "circle") {
+      totalArea -= circleArea(op.width / 2);
+    } else {
+      totalArea -= op.width * op.height;
+    }
+  }
+
+  return Math.max(0, totalArea);
+}
+
 export function calculateCentroid(
   perimeter: Vertex[],
   openings: Opening[]

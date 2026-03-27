@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { calculateLoadCombinations } from "@/lib/calculations";
-import { calculateCentroid } from "@/lib/centroid";
+import { calculateCentroid, calculateNetArea } from "@/lib/centroid";
 import { parseDxfFile } from "@/lib/dxfParser";
 import { exportPanelToDxf } from "@/lib/dxfExport";
 import {
@@ -2220,6 +2220,9 @@ function PanelProperties({ panel }: { panel: Panel }) {
                         >{view.name}</span>
                       )}
                       <div className="flex items-center gap-2">
+                        <span className="text-[10px] opacity-70" title="Net area (polygon minus openings)">
+                          {(calculateNetArea(view.polygon, view.openings) / 144).toFixed(1)} ft²
+                        </span>
                         <span className="text-[10px] opacity-70">{view.openings.length} opening{view.openings.length !== 1 ? "s" : ""}</span>
                         <button
                           title={view.showCentroid ? "Hide centroid" : "Show centroid"}
