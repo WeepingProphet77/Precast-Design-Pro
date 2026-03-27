@@ -1,24 +1,50 @@
 
 import React, { useState } from "react";
 import { useProject } from "@/lib/store";
-import { calculateLoadCombinations } from "@/lib/calculations";
+import { calculateLoadCombinations, calculateDirectionalResult } from "@/lib/calculations";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Card } from "@/components/ui/card";
-import { ArrowUpDown, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Download, ChevronDown, ChevronRight } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { ConnectionDirectionalResult } from "@/lib/types";
+
+function formatDcr(dcr: number): string {
+  if (!isFinite(dcr)) return "O/S";
+  return (dcr * 100).toFixed(1) + "%";
+}
+
+function dcrColor(dcr: number): string {
+  if (!isFinite(dcr)) return "text-destructive font-bold";
+  if (dcr > 1.0) return "text-destructive font-bold";
+  if (dcr > 0.9) return "text-warning font-bold";
+  return "text-success font-bold";
+}
 
 export default function MasterSpreadsheet() {
   const { project, updateProjectInfo } = useProject();
   const [filterPanel, setFilterPanel] = useState<string>("all");
   const [filterType, setFilterType] = useState<string>("all");
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
-  // Flatten all connections
-  const allData = project.panels.flatMap(panel => 
+  const toggleExpand = (key: string) => {
+    setExpandedRows(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  // Flatten all connections with directional results
+  const allData = project.panels.flatMap(panel =>
     panel.connections.map(conn => {
       const capacity = project.capacities.find(c => c.type === conn.type);
       const loads = calculateLoadCombinations(conn, capacity, project.info.designMethod, project.info.designStandard);
+      const directional = capacity
+        ? calculateDirectionalResult(conn, capacity, project.info.designMethod, project.info.designStandard)
+        : null;
+
       // Find governing case: highest utilization if capacities exist, otherwise highest force magnitude
       const forceMagnitude = (l: typeof loads[0]) => Math.abs(l.fx) + Math.abs(l.fy) + Math.abs(l.fz);
       const governing = loads.reduce((prev, current) => {
@@ -30,7 +56,17 @@ export default function MasterSpreadsheet() {
         return forceMagnitude(current) > forceMagnitude(prev) ? current : prev;
       }, loads[0]);
 
+      // Max DCR across all directional demands
+      const maxDcr = directional
+        ? Math.max(
+            directional.xPositive.dcr, directional.xNegative.dcr,
+            directional.yPositive.dcr, directional.yNegative.dcr,
+            directional.zPositive.dcr, directional.zNegative.dcr,
+          )
+        : governing.maxUtilization;
+
       return {
+        key: `${panel.id}_${conn.id}`,
         panelName: panel.name,
         connLabel: conn.label,
         connType: conn.type,
@@ -38,7 +74,8 @@ export default function MasterSpreadsheet() {
         fx: governing.fx,
         fy: governing.fy,
         fz: governing.fz,
-        utilization: governing.maxUtilization
+        utilization: maxDcr,
+        directional,
       };
     })
   );
@@ -107,6 +144,7 @@ export default function MasterSpreadsheet() {
                <Table>
                    <TableHeader className="bg-muted/50 sticky top-0 z-10">
                        <TableRow>
+                           <TableHead className="w-[30px]"></TableHead>
                            <TableHead>Panel</TableHead>
                            <TableHead>Connection</TableHead>
                            <TableHead>Type</TableHead>
@@ -114,18 +152,31 @@ export default function MasterSpreadsheet() {
                            <TableHead className="text-right">Fx (lbs)</TableHead>
                            <TableHead className="text-right">Fy (lbs)</TableHead>
                            <TableHead className="text-right">Fz (lbs)</TableHead>
-                           <TableHead className="text-right">Utilization</TableHead>
+                           <TableHead className="text-right">Max DCR</TableHead>
                        </TableRow>
                    </TableHeader>
                    <TableBody>
                        {filteredData.length === 0 ? (
                            <TableRow>
-                               <TableCell colSpan={8} className="text-center h-24 text-muted-foreground">
+                               <TableCell colSpan={9} className="text-center h-24 text-muted-foreground">
                                    No connections found matching filters.
                                </TableCell>
                            </TableRow>
-                       ) : filteredData.map((row, i) => (
-                           <TableRow key={i}>
+                       ) : filteredData.map((row) => {
+                         const isExpanded = expandedRows.has(row.key);
+                         return (
+                           <React.Fragment key={row.key}>
+                             <TableRow
+                               className={cn("cursor-pointer hover:bg-muted/30", isExpanded && "bg-muted/20")}
+                               onClick={() => row.directional && toggleExpand(row.key)}
+                             >
+                               <TableCell className="w-[30px] px-2">
+                                 {row.directional && (
+                                   isExpanded
+                                     ? <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                                     : <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                                 )}
+                               </TableCell>
                                <TableCell className="font-medium">{row.panelName}</TableCell>
                                <TableCell>{row.connLabel}</TableCell>
                                <TableCell>
@@ -139,19 +190,24 @@ export default function MasterSpreadsheet() {
                                <TableCell className="text-right font-mono">{row.fz}</TableCell>
                                <TableCell className="text-right">
                                    {row.utilization !== undefined && isFinite(row.utilization) ? (
-                                       <span className={cn(
-                                           "font-bold",
-                                           row.utilization > 1.0 ? "text-destructive" :
-                                           row.utilization > 0.9 ? "text-warning" : "text-success"
-                                       )}>
-                                           {(row.utilization * 100).toFixed(1)}%
+                                       <span className={dcrColor(row.utilization)}>
+                                           {formatDcr(row.utilization)}
                                        </span>
                                    ) : row.utilization === Infinity ? (
                                        <span className="font-bold text-destructive">O/S</span>
                                    ) : "N/A"}
                                </TableCell>
-                           </TableRow>
-                       ))}
+                             </TableRow>
+                             {isExpanded && row.directional && (
+                               <TableRow className="bg-muted/10">
+                                 <TableCell colSpan={9} className="p-0">
+                                   <DirectionalDemandTable result={row.directional} />
+                                 </TableCell>
+                               </TableRow>
+                             )}
+                           </React.Fragment>
+                         );
+                       })}
                    </TableBody>
                </Table>
            </div>
@@ -160,5 +216,42 @@ export default function MasterSpreadsheet() {
   );
 }
 
-// Utility to merge classes
-import { cn } from "@/lib/utils";
+function DirectionalDemandTable({ result }: { result: ConnectionDirectionalResult }) {
+  const axes = [
+    { label: "X-Axis (Horizontal)", pos: result.xPositive, neg: result.xNegative, posLabel: "+X Right", negLabel: "-X Left" },
+    { label: "Y-Axis (Vertical)", pos: result.yPositive, neg: result.yNegative, posLabel: "+Y Compression", negLabel: "-Y Tension" },
+    { label: "Z-Axis (Out-of-Plane)", pos: result.zPositive, neg: result.zNegative, posLabel: "+Z Pressure", negLabel: "-Z Suction" },
+  ];
+
+  return (
+    <div className="px-8 py-3">
+      <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">Directional Demand Summary</div>
+      <div className="grid grid-cols-3 gap-3">
+        {axes.map(axis => (
+          <div key={axis.label} className="border rounded p-2 bg-white">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-center mb-2 text-muted-foreground">{axis.label}</div>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">{axis.posLabel}:</span>
+                <span className="font-mono font-bold">{axis.pos.demand} lbs</span>
+              </div>
+              <div className="flex items-center justify-between text-[10px]">
+                <span className="text-muted-foreground truncate mr-1">{axis.pos.controllingCombo}</span>
+                <span className={cn("font-mono", dcrColor(axis.pos.dcr))}>{formatDcr(axis.pos.dcr)}</span>
+              </div>
+              <div className="border-t my-1" />
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">{axis.negLabel}:</span>
+                <span className="font-mono font-bold">{axis.neg.demand} lbs</span>
+              </div>
+              <div className="flex items-center justify-between text-[10px]">
+                <span className="text-muted-foreground truncate mr-1">{axis.neg.controllingCombo}</span>
+                <span className={cn("font-mono", dcrColor(axis.neg.dcr))}>{formatDcr(axis.neg.dcr)}</span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}

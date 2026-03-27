@@ -19,6 +19,10 @@ export interface ConnectionForces {
   R?: Vector3;
   W: Vector3;
   E: Vector3;
+  // Negative direction cases for reversible loads (wind suction, seismic reverse)
+  // If not provided, defaults to negation of W and E respectively
+  Wneg?: Vector3;
+  Eneg?: Vector3;
 }
 
 export interface FactoredLoad {
@@ -30,6 +34,23 @@ export interface FactoredLoad {
   utilizationY?: number;
   utilizationZ?: number;
   maxUtilization?: number;
+}
+
+// Computed result per axis per direction
+export interface DirectionalDemand {
+  demand: number;           // factored force in lbs (signed)
+  controllingCombo: string; // e.g., "LC 6: 0.9D + 1.0W"
+  dcr: number;              // |demand| / capacity
+}
+
+// Full directional result for a connection
+export interface ConnectionDirectionalResult {
+  xPositive: DirectionalDemand;
+  xNegative: DirectionalDemand;
+  yPositive: DirectionalDemand;
+  yNegative: DirectionalDemand;
+  zPositive: DirectionalDemand;
+  zNegative: DirectionalDemand;
 }
 
 export interface ConnectionNode {
@@ -166,6 +187,16 @@ export interface ConnectionCapacity {
   capacityX: number;
   capacityY: number;
   capacityZ: number;
+  // Directional capacities (positive and negative per axis)
+  // +X = rightward, -X = leftward
+  capacityXPositive?: number;
+  capacityXNegative?: number;
+  // +Y = compression/bearing, -Y = tension/uplift
+  capacityYPositive?: number;
+  capacityYNegative?: number;
+  // +Z = pressure (toward panel face), -Z = suction (away from panel face)
+  capacityZPositive?: number;
+  capacityZNegative?: number;
 }
 
 export interface ProjectInfo {
@@ -195,7 +226,13 @@ export const createDefaultProject = (): ProjectData => ({
   },
   panels: [],
   capacities: [
-    { type: "A", capacityX: 5000, capacityY: 10000, capacityZ: 5000 },
-    { type: "B", capacityX: 8000, capacityY: 15000, capacityZ: 8000 },
+    { type: "A", capacityX: 5000, capacityY: 10000, capacityZ: 5000,
+      capacityXPositive: 5000, capacityXNegative: 5000,
+      capacityYPositive: 10000, capacityYNegative: 0,
+      capacityZPositive: 5000, capacityZNegative: 5000 },
+    { type: "B", capacityX: 8000, capacityY: 15000, capacityZ: 8000,
+      capacityXPositive: 8000, capacityXNegative: 8000,
+      capacityYPositive: 15000, capacityYNegative: 8000,
+      capacityZPositive: 8000, capacityZNegative: 8000 },
   ],
 });

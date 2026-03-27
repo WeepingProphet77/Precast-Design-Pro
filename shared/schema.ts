@@ -36,6 +36,13 @@ export const capacities = pgTable("capacities", {
   capacityX: integer("capacity_x").notNull(),
   capacityY: integer("capacity_y").notNull(),
   capacityZ: integer("capacity_z").notNull(),
+  // Directional capacities
+  capacityXPositive: integer("capacity_x_positive"),
+  capacityXNegative: integer("capacity_x_negative"),
+  capacityYPositive: integer("capacity_y_positive"),
+  capacityYNegative: integer("capacity_y_negative"),
+  capacityZPositive: integer("capacity_z_positive"),
+  capacityZNegative: integer("capacity_z_negative"),
 });
 
 export const insertProjectSchema = createInsertSchema(projects).omit({ id: true, createdAt: true, updatedAt: true });

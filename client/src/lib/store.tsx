@@ -15,6 +15,16 @@ function loadCachedProject(): ProjectData | null {
       if (!data.info.designMethod) data.info.designMethod = "LRFD";
       // Strip legacy name field if present
       data.capacities = data.capacities.map(({ name, ...rest }: any) => rest);
+      // Migrate capacities: populate directional fields from legacy single-value fields
+      data.capacities = data.capacities.map((cap: any) => ({
+        ...cap,
+        capacityXPositive: cap.capacityXPositive ?? cap.capacityX,
+        capacityXNegative: cap.capacityXNegative ?? cap.capacityX,
+        capacityYPositive: cap.capacityYPositive ?? cap.capacityY,
+        capacityYNegative: cap.capacityYNegative ?? cap.capacityY,
+        capacityZPositive: cap.capacityZPositive ?? cap.capacityZ,
+        capacityZNegative: cap.capacityZNegative ?? cap.capacityZ,
+      }));
       return data;
     }
   } catch {
@@ -448,6 +458,16 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (!data.info.designMethod) data.info.designMethod = "LRFD";
         // Strip legacy name field if present
         data.capacities = data.capacities.map(({ name, ...rest }: any) => rest);
+        // Migrate capacities: populate directional fields from legacy single-value fields
+        data.capacities = data.capacities.map((cap: any) => ({
+          ...cap,
+          capacityXPositive: cap.capacityXPositive ?? cap.capacityX,
+          capacityXNegative: cap.capacityXNegative ?? cap.capacityX,
+          capacityYPositive: cap.capacityYPositive ?? cap.capacityY,
+          capacityYNegative: cap.capacityYNegative ?? cap.capacityY,
+          capacityZPositive: cap.capacityZPositive ?? cap.capacityZ,
+          capacityZNegative: cap.capacityZNegative ?? cap.capacityZ,
+        }));
         setProject(data);
         saveToBrowserCache(data);
         const openedName = file.name;
