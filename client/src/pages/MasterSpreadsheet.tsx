@@ -19,11 +19,16 @@ export default function MasterSpreadsheet() {
     panel.connections.map(conn => {
       const capacity = project.capacities.find(c => c.type === conn.type);
       const loads = calculateLoadCombinations(conn, capacity, project.info.designMethod, project.info.designStandard);
-      // Find governing case (max utilization, or max force magnitude if no capacity)
-      // For simplicity, let's take the one with highest UC, or just the first one if undefined
-      const governing = loads.reduce((prev, current) => 
-        (current.maxUtilization || 0) > (prev.maxUtilization || 0) ? current : prev
-      , loads[0]);
+      // Find governing case: highest utilization if capacities exist, otherwise highest force magnitude
+      const forceMagnitude = (l: typeof loads[0]) => Math.abs(l.fx) + Math.abs(l.fy) + Math.abs(l.fz);
+      const governing = loads.reduce((prev, current) => {
+        const prevUtil = prev.maxUtilization;
+        const curUtil = current.maxUtilization;
+        if (prevUtil !== undefined && curUtil !== undefined && isFinite(prevUtil) && isFinite(curUtil)) {
+          return curUtil > prevUtil ? current : prev;
+        }
+        return forceMagnitude(current) > forceMagnitude(prev) ? current : prev;
+      }, loads[0]);
 
       return {
         panelName: panel.name,
@@ -133,14 +138,16 @@ export default function MasterSpreadsheet() {
                                <TableCell className="text-right font-mono">{row.fy}</TableCell>
                                <TableCell className="text-right font-mono">{row.fz}</TableCell>
                                <TableCell className="text-right">
-                                   {row.utilization !== undefined ? (
+                                   {row.utilization !== undefined && isFinite(row.utilization) ? (
                                        <span className={cn(
                                            "font-bold",
-                                           row.utilization > 1.0 ? "text-destructive" : 
+                                           row.utilization > 1.0 ? "text-destructive" :
                                            row.utilization > 0.9 ? "text-warning" : "text-success"
                                        )}>
                                            {(row.utilization * 100).toFixed(1)}%
                                        </span>
+                                   ) : row.utilization === Infinity ? (
+                                       <span className="font-bold text-destructive">O/S</span>
                                    ) : "N/A"}
                                </TableCell>
                            </TableRow>

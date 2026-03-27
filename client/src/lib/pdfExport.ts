@@ -791,7 +791,9 @@ function generatePanelPage(doc: jsPDF, project: ProjectData, panel: Panel) {
       y = 56;
     }
 
-    y = drawSectionTitle(doc, `${project.info.designMethod === "ASD" ? "ASD" : "LRFD"} LOAD COMBINATIONS`, y);
+    const sectionRef = project.info.designMethod === "ASD" ? "§2.4" : "§2.3";
+    const stdRef = project.info.designStandard === "ASCE7-22" ? "ASCE 7-22" : "ASCE 7-16";
+    y = drawSectionTitle(doc, `${project.info.designMethod === "ASD" ? "ASD" : "LRFD"} LOAD COMBINATIONS (${stdRef} ${sectionRef})`, y);
     y += 2;
 
     const comboRows: string[][] = [];
@@ -805,7 +807,7 @@ function generatePanelPage(doc: jsPDF, project: ProjectData, panel: Panel) {
           String(combo.fx),
           String(combo.fy),
           String(combo.fz),
-          combo.maxUtilization !== undefined ? `${(combo.maxUtilization * 100).toFixed(1)}%` : "N/A",
+          combo.maxUtilization !== undefined && isFinite(combo.maxUtilization) ? `${(combo.maxUtilization * 100).toFixed(1)}%` : combo.maxUtilization === Infinity ? "O/S" : "N/A",
         ]);
       });
     });
@@ -859,9 +861,15 @@ function generateMasterSpreadsheet(doc: jsPDF, project: ProjectData) {
     panel.connections.map(conn => {
       const capacity = project.capacities.find(c => c.type === conn.type);
       const loads = calculateLoadCombinations(conn, capacity, project.info.designMethod, project.info.designStandard);
-      const governing = loads.reduce((prev, current) =>
-        (current.maxUtilization || 0) > (prev.maxUtilization || 0) ? current : prev
-      , loads[0]);
+      const forceMagnitude = (l: typeof loads[0]) => Math.abs(l.fx) + Math.abs(l.fy) + Math.abs(l.fz);
+      const governing = loads.reduce((prev, current) => {
+        const prevUtil = prev.maxUtilization;
+        const curUtil = current.maxUtilization;
+        if (prevUtil !== undefined && curUtil !== undefined && isFinite(prevUtil) && isFinite(curUtil)) {
+          return curUtil > prevUtil ? current : prev;
+        }
+        return forceMagnitude(current) > forceMagnitude(prev) ? current : prev;
+      }, loads[0]);
       return {
         panelName: panel.name,
         connLabel: conn.label,
@@ -888,7 +896,7 @@ function generateMasterSpreadsheet(doc: jsPDF, project: ProjectData) {
         String(row.fx),
         String(row.fy),
         String(row.fz),
-        row.utilization !== undefined ? `${(row.utilization * 100).toFixed(1)}%` : "N/A",
+        row.utilization !== undefined && isFinite(row.utilization) ? `${(row.utilization * 100).toFixed(1)}%` : row.utilization === Infinity ? "O/S" : "N/A",
       ]),
       styles: { fontSize: 8, cellPadding: 4, textColor: COLORS.text },
       headStyles: { fillColor: COLORS.accent, textColor: [255, 255, 255], fontStyle: "bold", fontSize: 8 },
