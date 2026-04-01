@@ -19,8 +19,10 @@ export interface ConnectionForces {
   R?: Vector3;
   W: Vector3;
   E: Vector3;
-  // Negative direction cases for reversible loads (wind suction, seismic reverse)
-  // If not provided, defaults to negation of W and E respectively
+  // Negative direction cases for all load types
+  // If not provided, defaults to negation of the positive case
+  Dneg?: Vector3;
+  Lneg?: Vector3;
   Wneg?: Vector3;
   Eneg?: Vector3;
 }

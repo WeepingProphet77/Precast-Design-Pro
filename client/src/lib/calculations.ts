@@ -46,168 +46,210 @@ function getDirectionalCapacity(
 }
 
 /**
- * Build all load combinations, evaluating W and E in both positive and negative
- * directions for combinations that include them.
+ * A "load term" in a combination: a load type key and its factor.
+ * We track the key so we can substitute +/- variants.
+ */
+interface LoadTerm {
+  key: "D" | "L" | "W" | "E" | "Lr" | "S" | "R";
+  factor: number;
+}
+
+/** A base combination template before directional expansion. */
+interface BaseCombo {
+  label: string;
+  terms: LoadTerm[];
+}
+
+/**
+ * Given a base combination and the +/- force vectors for each load type,
+ * generate all directional variants. D, L, W, E each have a positive and
+ * negative case; Lr, S, R do not (they are environmental loads with a single
+ * direction). For each reversible load present in the combo, we branch into
+ * 2 variants, producing 2^n total variants where n = number of reversible
+ * loads in the combo.
+ */
+function expandDirectionalVariants(
+  base: BaseCombo,
+  forces: Record<string, Vector3>
+): Array<{ name: string; force: Vector3 }> {
+  // Reversible load keys: those that have a "neg" counterpart in forces
+  const reversibleKeys = new Set(["D", "L", "W", "E"]);
+
+  // Find which reversible keys appear in this combo's terms
+  const reversibleTermIndices: number[] = [];
+  for (let i = 0; i < base.terms.length; i++) {
+    if (reversibleKeys.has(base.terms[i].key)) {
+      reversibleTermIndices.push(i);
+    }
+  }
+
+  const n = reversibleTermIndices.length;
+  const results: Array<{ name: string; force: Vector3 }> = [];
+
+  // Iterate over all 2^n combinations of +/- for the reversible terms
+  for (let mask = 0; mask < (1 << n); mask++) {
+    const parts: string[] = [];
+    const vectors: Vector3[] = [];
+    let allPositive = true;
+
+    for (let i = 0; i < base.terms.length; i++) {
+      const term = base.terms[i];
+      const revIdx = reversibleTermIndices.indexOf(i);
+      const isNeg = revIdx >= 0 && (mask & (1 << revIdx)) !== 0;
+      if (isNeg) allPositive = false;
+
+      const forceKey = isNeg ? `${term.key}neg` : term.key;
+      const vec = forces[forceKey] || { x: 0, y: 0, z: 0 };
+      vectors.push(scale(vec, term.factor));
+    }
+
+    // Build a descriptive suffix showing which loads are in negative direction
+    const dirParts: string[] = [];
+    for (let j = 0; j < n; j++) {
+      const termIdx = reversibleTermIndices[j];
+      const term = base.terms[termIdx];
+      const isNeg = (mask & (1 << j)) !== 0;
+      if (isNeg) dirParts.push(`${term.key}-`);
+    }
+
+    const suffix = dirParts.length === 0 ? "" : ` [${dirParts.join(",")}]`;
+    results.push({
+      name: `${base.label}${suffix}`,
+      force: add(...vectors),
+    });
+  }
+
+  return results;
+}
+
+/**
+ * Build all load combinations, evaluating D, L, W, and E in both positive
+ * and negative directions for all combinations.
  * Returns an array of { name, force } for every combination variant.
  */
 function buildAllCombinations(
   connection: ConnectionNode,
   designMethod: "LRFD" | "ASD"
 ): Array<{ name: string; force: Vector3 }> {
-  const { D, L, W, E } = connection.forces;
-  // Negative direction cases: use explicit Wneg/Eneg if provided, otherwise negate W/E
-  const Wneg = connection.forces.Wneg || negate(W);
-  const Eneg = connection.forces.Eneg || negate(E);
+  const f = connection.forces;
 
-  const Lr = connection.forces.Lr || { x: 0, y: 0, z: 0 };
-  const S = connection.forces.S || { x: 0, y: 0, z: 0 };
-  const R = connection.forces.R || { x: 0, y: 0, z: 0 };
+  // Build the complete forces map with positive and negative variants
+  const forces: Record<string, Vector3> = {
+    D: f.D,
+    Dneg: f.Dneg || negate(f.D),
+    L: f.L,
+    Lneg: f.Lneg || negate(f.L),
+    W: f.W,
+    Wneg: f.Wneg || negate(f.W),
+    E: f.E,
+    Eneg: f.Eneg || negate(f.E),
+    Lr: f.Lr || { x: 0, y: 0, z: 0 },
+    S: f.S || { x: 0, y: 0, z: 0 },
+    R: f.R || { x: 0, y: 0, z: 0 },
+  };
 
-  const results: Array<{ name: string; force: Vector3 }> = [];
+  const baseCombos: BaseCombo[] = [];
 
   if (designMethod === "LRFD") {
-    // 1. 1.4D (no W or E)
-    results.push({ name: "1. 1.4D", force: scale(D, 1.4) });
+    // 1. 1.4D
+    baseCombos.push({ label: "1. 1.4D", terms: [{ key: "D", factor: 1.4 }] });
 
-    // 2. 1.2D + 1.6L + 0.5(Lr or S or R) — pick worst of Lr, S, R
-    for (const [envLabel, envForce] of [["Lr", Lr], ["S", S], ["R", R]] as const) {
-      results.push({
-        name: `2. 1.2D + 1.6L + 0.5${envLabel}`,
-        force: add(scale(D, 1.2), scale(L, 1.6), scale(envForce as Vector3, 0.5)),
+    // 2. 1.2D + 1.6L + 0.5(Lr or S or R)
+    for (const env of ["Lr", "S", "R"] as const) {
+      baseCombos.push({
+        label: `2. 1.2D+1.6L+0.5${env}`,
+        terms: [{ key: "D", factor: 1.2 }, { key: "L", factor: 1.6 }, { key: env, factor: 0.5 }],
       });
     }
 
     // 3. 1.2D + 1.6(Lr or S or R) + (L or 0.5W)
-    for (const [envLabel, envForce] of [["Lr", Lr], ["S", S], ["R", R]] as const) {
+    for (const env of ["Lr", "S", "R"] as const) {
       // With L
-      results.push({
-        name: `3a. 1.2D + 1.6${envLabel} + 1.0L`,
-        force: add(scale(D, 1.2), scale(envForce as Vector3, 1.6), scale(L, 1.0)),
+      baseCombos.push({
+        label: `3. 1.2D+1.6${env}+L`,
+        terms: [{ key: "D", factor: 1.2 }, { key: env, factor: 1.6 }, { key: "L", factor: 1.0 }],
       });
-      // With 0.5W (positive)
-      results.push({
-        name: `3b. 1.2D + 1.6${envLabel} + 0.5W(+)`,
-        force: add(scale(D, 1.2), scale(envForce as Vector3, 1.6), scale(W, 0.5)),
-      });
-      // With 0.5W (negative)
-      results.push({
-        name: `3c. 1.2D + 1.6${envLabel} + 0.5W(-)`,
-        force: add(scale(D, 1.2), scale(envForce as Vector3, 1.6), scale(Wneg, 0.5)),
+      // With 0.5W
+      baseCombos.push({
+        label: `3. 1.2D+1.6${env}+0.5W`,
+        terms: [{ key: "D", factor: 1.2 }, { key: env, factor: 1.6 }, { key: "W", factor: 0.5 }],
       });
     }
 
     // 4. 1.2D + 1.0W + L + 0.5(Lr or S or R)
-    for (const [envLabel, envForce] of [["Lr", Lr], ["S", S], ["R", R]] as const) {
-      // W positive
-      results.push({
-        name: `4a. 1.2D + 1.0W(+) + L + 0.5${envLabel}`,
-        force: add(scale(D, 1.2), scale(W, 1.0), scale(L, 1.0), scale(envForce as Vector3, 0.5)),
-      });
-      // W negative
-      results.push({
-        name: `4b. 1.2D + 1.0W(-) + L + 0.5${envLabel}`,
-        force: add(scale(D, 1.2), scale(Wneg, 1.0), scale(L, 1.0), scale(envForce as Vector3, 0.5)),
+    for (const env of ["Lr", "S", "R"] as const) {
+      baseCombos.push({
+        label: `4. 1.2D+W+L+0.5${env}`,
+        terms: [{ key: "D", factor: 1.2 }, { key: "W", factor: 1.0 }, { key: "L", factor: 1.0 }, { key: env, factor: 0.5 }],
       });
     }
 
     // 5. 1.2D + 1.0E + L + 0.2S
-    // E positive
-    results.push({
-      name: "5a. 1.2D + 1.0E(+) + L + 0.2S",
-      force: add(scale(D, 1.2), scale(E, 1.0), scale(L, 1.0), scale(S, 0.2)),
-    });
-    // E negative
-    results.push({
-      name: "5b. 1.2D + 1.0E(-) + L + 0.2S",
-      force: add(scale(D, 1.2), scale(Eneg, 1.0), scale(L, 1.0), scale(S, 0.2)),
+    baseCombos.push({
+      label: "5. 1.2D+E+L+0.2S",
+      terms: [{ key: "D", factor: 1.2 }, { key: "E", factor: 1.0 }, { key: "L", factor: 1.0 }, { key: "S", factor: 0.2 }],
     });
 
     // 6. 0.9D + 1.0W
-    results.push({
-      name: "6a. 0.9D + 1.0W(+)",
-      force: add(scale(D, 0.9), scale(W, 1.0)),
-    });
-    results.push({
-      name: "6b. 0.9D + 1.0W(-)",
-      force: add(scale(D, 0.9), scale(Wneg, 1.0)),
+    baseCombos.push({
+      label: "6. 0.9D+W",
+      terms: [{ key: "D", factor: 0.9 }, { key: "W", factor: 1.0 }],
     });
 
     // 7. 0.9D + 1.0E
-    results.push({
-      name: "7a. 0.9D + 1.0E(+)",
-      force: add(scale(D, 0.9), scale(E, 1.0)),
-    });
-    results.push({
-      name: "7b. 0.9D + 1.0E(-)",
-      force: add(scale(D, 0.9), scale(Eneg, 1.0)),
+    baseCombos.push({
+      label: "7. 0.9D+E",
+      terms: [{ key: "D", factor: 0.9 }, { key: "E", factor: 1.0 }],
     });
   } else {
     // ASD Combinations per ASCE 7 Section 2.4
     // 1. D
-    results.push({ name: "1. D", force: scale(D, 1.0) });
+    baseCombos.push({ label: "1. D", terms: [{ key: "D", factor: 1.0 }] });
 
     // 2. D + L
-    results.push({ name: "2. D + L", force: add(scale(D, 1.0), scale(L, 1.0)) });
+    baseCombos.push({ label: "2. D+L", terms: [{ key: "D", factor: 1.0 }, { key: "L", factor: 1.0 }] });
 
     // 3. D + 0.75L + 0.75(0.6W)
-    results.push({
-      name: "3a. D + 0.75L + 0.45W(+)",
-      force: add(scale(D, 1.0), scale(L, 0.75), scale(W, 0.45)),
-    });
-    results.push({
-      name: "3b. D + 0.75L + 0.45W(-)",
-      force: add(scale(D, 1.0), scale(L, 0.75), scale(Wneg, 0.45)),
+    baseCombos.push({
+      label: "3. D+0.75L+0.45W",
+      terms: [{ key: "D", factor: 1.0 }, { key: "L", factor: 0.75 }, { key: "W", factor: 0.45 }],
     });
 
     // 4. D + 0.6W
-    results.push({
-      name: "4a. D + 0.6W(+)",
-      force: add(scale(D, 1.0), scale(W, 0.6)),
-    });
-    results.push({
-      name: "4b. D + 0.6W(-)",
-      force: add(scale(D, 1.0), scale(Wneg, 0.6)),
+    baseCombos.push({
+      label: "4. D+0.6W",
+      terms: [{ key: "D", factor: 1.0 }, { key: "W", factor: 0.6 }],
     });
 
     // 5. 0.6D + 0.6W
-    results.push({
-      name: "5a. 0.6D + 0.6W(+)",
-      force: add(scale(D, 0.6), scale(W, 0.6)),
-    });
-    results.push({
-      name: "5b. 0.6D + 0.6W(-)",
-      force: add(scale(D, 0.6), scale(Wneg, 0.6)),
+    baseCombos.push({
+      label: "5. 0.6D+0.6W",
+      terms: [{ key: "D", factor: 0.6 }, { key: "W", factor: 0.6 }],
     });
 
     // 6. D + 0.7E
-    results.push({
-      name: "6a. D + 0.7E(+)",
-      force: add(scale(D, 1.0), scale(E, 0.7)),
-    });
-    results.push({
-      name: "6b. D + 0.7E(-)",
-      force: add(scale(D, 1.0), scale(Eneg, 0.7)),
+    baseCombos.push({
+      label: "6. D+0.7E",
+      terms: [{ key: "D", factor: 1.0 }, { key: "E", factor: 0.7 }],
     });
 
     // 7. D + 0.75L + 0.75(0.7E)
-    results.push({
-      name: "7a. D + 0.75L + 0.525E(+)",
-      force: add(scale(D, 1.0), scale(L, 0.75), scale(E, 0.525)),
-    });
-    results.push({
-      name: "7b. D + 0.75L + 0.525E(-)",
-      force: add(scale(D, 1.0), scale(L, 0.75), scale(Eneg, 0.525)),
+    baseCombos.push({
+      label: "7. D+0.75L+0.525E",
+      terms: [{ key: "D", factor: 1.0 }, { key: "L", factor: 0.75 }, { key: "E", factor: 0.525 }],
     });
 
     // 8. 0.6D + 0.7E
-    results.push({
-      name: "8a. 0.6D + 0.7E(+)",
-      force: add(scale(D, 0.6), scale(E, 0.7)),
+    baseCombos.push({
+      label: "8. 0.6D+0.7E",
+      terms: [{ key: "D", factor: 0.6 }, { key: "E", factor: 0.7 }],
     });
-    results.push({
-      name: "8b. 0.6D + 0.7E(-)",
-      force: add(scale(D, 0.6), scale(Eneg, 0.7)),
-    });
+  }
+
+  // Expand all base combos into directional variants
+  const results: Array<{ name: string; force: Vector3 }> = [];
+  for (const base of baseCombos) {
+    results.push(...expandDirectionalVariants(base, forces));
   }
 
   return results;

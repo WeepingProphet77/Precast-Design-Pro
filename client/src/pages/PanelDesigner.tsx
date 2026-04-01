@@ -2778,8 +2778,10 @@ function ConnectionProperties({ panelId, connectionId, onDeselect }: { panelId: 
   ];
 
   const loadLabels: Record<string, string> = {
-    D: "Dead",
-    L: "Live",
+    D: "Dead (+)",
+    Dneg: "Dead (-)",
+    L: "Live (+)",
+    Lneg: "Live (-)",
     W: "Wind (+)",
     Wneg: "Wind (-)",
     E: "Seismic (+)",
@@ -2787,8 +2789,10 @@ function ConnectionProperties({ panelId, connectionId, onDeselect }: { panelId: 
   };
 
   const loadBadgeLabels: Record<string, string> = {
-    D: "D",
-    L: "L",
+    D: "D+",
+    Dneg: "D-",
+    L: "L+",
+    Lneg: "L-",
     W: "W+",
     Wneg: "W-",
     E: "E+",
@@ -2882,10 +2886,10 @@ function ConnectionProperties({ panelId, connectionId, onDeselect }: { panelId: 
       <ScrollArea className="flex-1">
         <TabsContent value="forces" className="p-4 m-0">
           <div className="space-y-4">
-            {(["D", "L", "W", "Wneg", "E", "Eneg"] as const).map(caseKey => {
+            {(["D", "Dneg", "L", "Lneg", "W", "Wneg", "E", "Eneg"] as const).map(caseKey => {
               const forces = connection.forces[caseKey] || { x: 0, y: 0, z: 0 };
-              const isNegCase = caseKey === "Wneg" || caseKey === "Eneg";
-              const parentKey = caseKey === "Wneg" ? "W" : caseKey === "Eneg" ? "E" : null;
+              const isNegCase = caseKey === "Dneg" || caseKey === "Lneg" || caseKey === "Wneg" || caseKey === "Eneg";
+              const parentKey = caseKey === "Dneg" ? "D" : caseKey === "Lneg" ? "L" : caseKey === "Wneg" ? "W" : caseKey === "Eneg" ? "E" : null;
               const parentForces = parentKey ? (connection.forces[parentKey] || { x: 0, y: 0, z: 0 }) : null;
               const hasOverride = isNegCase && connection.forces[caseKey];
               return (
@@ -2985,8 +2989,10 @@ function MultiConnectionProperties({ panelId, connectionIds, onDeselect }: { pan
   ];
 
   const loadLabels: Record<string, string> = {
-    D: "Dead",
-    L: "Live",
+    D: "Dead (+)",
+    Dneg: "Dead (-)",
+    L: "Live (+)",
+    Lneg: "Live (-)",
     W: "Wind (+)",
     Wneg: "Wind (-)",
     E: "Seismic (+)",
@@ -2994,8 +3000,10 @@ function MultiConnectionProperties({ panelId, connectionIds, onDeselect }: { pan
   };
 
   const loadBadgeLabels: Record<string, string> = {
-    D: "D",
-    L: "L",
+    D: "D+",
+    Dneg: "D-",
+    L: "L+",
+    Lneg: "L-",
     W: "W+",
     Wneg: "W-",
     E: "E+",
@@ -3117,13 +3125,13 @@ function MultiConnectionProperties({ panelId, connectionIds, onDeselect }: { pan
       <ScrollArea className="flex-1">
         <TabsContent value="forces" className="p-4 m-0">
           <div className="space-y-4">
-            {(["D", "L", "W", "Wneg", "E", "Eneg"] as const).map(caseKey => {
-              const isNegCase = caseKey === "Wneg" || caseKey === "Eneg";
+            {(["D", "Dneg", "L", "Lneg", "W", "Wneg", "E", "Eneg"] as const).map(caseKey => {
+              const isNegCase = caseKey === "Dneg" || caseKey === "Lneg" || caseKey === "Wneg" || caseKey === "Eneg";
               const sharedForces: Record<string, number | undefined> = {};
               for (const axis of ["x", "y", "z"] as const) {
                 const getVal = (c: ConnectionNode) => {
-                  if (isNegCase && !c.forces[caseKey]) {
-                    const parentKey = caseKey === "Wneg" ? "W" : "E";
+                  if (isNegCase && !(c.forces as any)[caseKey]) {
+                    const parentKey = caseKey === "Dneg" ? "D" : caseKey === "Lneg" ? "L" : caseKey === "Wneg" ? "W" : "E";
                     const pf = c.forces[parentKey] || { x: 0, y: 0, z: 0 };
                     return -(pf as any)[axis];
                   }
