@@ -112,7 +112,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               data-testid="button-load-project"
             >
               <FolderOpen className="w-4 h-4" />
-              Open Project
+              Load Project
             </button>
             <button
               onClick={() => exportProjectToPDF(project)}

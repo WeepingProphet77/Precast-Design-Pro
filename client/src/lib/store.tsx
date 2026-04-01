@@ -441,7 +441,58 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
     isInitialLoad.current = true;
   }, []);
 
-  const loadProjectFromFile = useCallback(() => {
+  const loadProjectFromFile = useCallback(async () => {
+    const processProjectData = (data: ProjectData, fileName: string, handle: FileSystemFileHandle | null) => {
+      if (!data.info || !data.panels || !data.capacities) {
+        throw new Error("Invalid project file format");
+      }
+      if (!data.info.designStandard) data.info.designStandard = "ASCE7-16";
+      if (!data.info.designMethod) data.info.designMethod = "LRFD";
+      // Strip legacy name field if present
+      data.capacities = data.capacities.map(({ name, ...rest }: any) => rest);
+      // Migrate capacities: populate directional fields from legacy single-value fields
+      data.capacities = data.capacities.map((cap: any) => ({
+        ...cap,
+        capacityXPositive: cap.capacityXPositive ?? cap.capacityX,
+        capacityXNegative: cap.capacityXNegative ?? cap.capacityX,
+        capacityYPositive: cap.capacityYPositive ?? cap.capacityY,
+        capacityYNegative: cap.capacityYNegative ?? cap.capacityY,
+        capacityZPositive: cap.capacityZPositive ?? cap.capacityZ,
+        capacityZNegative: cap.capacityZNegative ?? cap.capacityZ,
+      }));
+      setProject(data);
+      saveToBrowserCache(data);
+      setCurrentFileName(fileName);
+      saveCachedFileName(fileName);
+      setIsDirty(false);
+      fileHandleRef.current = handle;
+    };
+
+    // Use File System Access API to get a handle for subsequent saves
+    if ("showOpenFilePicker" in window) {
+      try {
+        const [handle] = await (window as any).showOpenFilePicker({
+          types: [
+            {
+              description: "WELLS Connection Loading Project File",
+              accept: { "application/json": [".ppd", ".json"] },
+            },
+          ],
+          multiple: false,
+        });
+        const file = await handle.getFile();
+        const text = await file.text();
+        const data = JSON.parse(text) as ProjectData;
+        processProjectData(data, file.name, handle);
+        return;
+      } catch (err: any) {
+        if (err.name === "AbortError") return;
+        alert("Failed to load project file: " + (err.message || "Unknown error"));
+        return;
+      }
+    }
+
+    // Fallback for browsers without File System Access API
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".ppd,.json";
@@ -451,30 +502,7 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
       try {
         const text = await file.text();
         const data = JSON.parse(text) as ProjectData;
-        if (!data.info || !data.panels || !data.capacities) {
-          throw new Error("Invalid project file format");
-        }
-        if (!data.info.designStandard) data.info.designStandard = "ASCE7-16";
-        if (!data.info.designMethod) data.info.designMethod = "LRFD";
-        // Strip legacy name field if present
-        data.capacities = data.capacities.map(({ name, ...rest }: any) => rest);
-        // Migrate capacities: populate directional fields from legacy single-value fields
-        data.capacities = data.capacities.map((cap: any) => ({
-          ...cap,
-          capacityXPositive: cap.capacityXPositive ?? cap.capacityX,
-          capacityXNegative: cap.capacityXNegative ?? cap.capacityX,
-          capacityYPositive: cap.capacityYPositive ?? cap.capacityY,
-          capacityYNegative: cap.capacityYNegative ?? cap.capacityY,
-          capacityZPositive: cap.capacityZPositive ?? cap.capacityZ,
-          capacityZNegative: cap.capacityZNegative ?? cap.capacityZ,
-        }));
-        setProject(data);
-        saveToBrowserCache(data);
-        const openedName = file.name;
-        setCurrentFileName(openedName);
-        saveCachedFileName(openedName);
-        setIsDirty(false);
-        fileHandleRef.current = null;
+        processProjectData(data, file.name, null);
       } catch (err: any) {
         alert("Failed to load project file: " + (err.message || "Unknown error"));
       }
