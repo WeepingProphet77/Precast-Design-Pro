@@ -755,26 +755,30 @@ function generatePanelPage(doc: jsPDF, project: ProjectData, panel: Panel) {
     autoTable(doc, {
       startY: y,
       margin: { left: MARGIN, right: MARGIN },
-      head: [["Conn.", "Type", "Dx", "Dy", "Dz", "Lx", "Ly", "Lz", "W+x", "W+y", "W+z", "W-x", "W-y", "W-z", "E+x", "E+y", "E+z", "E-x", "E-y", "E-z"]],
+      head: [["Conn.", "Type", "D+x", "D+y", "D+z", "D-x", "D-y", "D-z", "L+x", "L+y", "L+z", "L-x", "L-y", "L-z", "W+x", "W+y", "W+z", "W-x", "W-y", "W-z", "E+x", "E+y", "E+z", "E-x", "E-y", "E-z"]],
       body: panel.connections.map(c => {
         const D = c.forces.D || { x: 0, y: 0, z: 0 };
         const L = c.forces.L || { x: 0, y: 0, z: 0 };
         const W = c.forces.W || { x: 0, y: 0, z: 0 };
         const E = c.forces.E || { x: 0, y: 0, z: 0 };
+        const Dneg = c.forces.Dneg || { x: -D.x, y: -D.y, z: -D.z };
+        const Lneg = c.forces.Lneg || { x: -L.x, y: -L.y, z: -L.z };
         const Wneg = c.forces.Wneg || { x: -W.x, y: -W.y, z: -W.z };
         const Eneg = c.forces.Eneg || { x: -E.x, y: -E.y, z: -E.z };
         return [
           c.label,
           c.type,
           String(D.x), String(D.y), String(D.z),
+          String(Dneg.x), String(Dneg.y), String(Dneg.z),
           String(L.x), String(L.y), String(L.z),
+          String(Lneg.x), String(Lneg.y), String(Lneg.z),
           String(W.x), String(W.y), String(W.z),
           String(Wneg.x), String(Wneg.y), String(Wneg.z),
           String(E.x), String(E.y), String(E.z),
           String(Eneg.x), String(Eneg.y), String(Eneg.z),
         ];
       }),
-      styles: { fontSize: 5, cellPadding: 1.5, textColor: COLORS.text, halign: "center" },
+      styles: { fontSize: 4.5, cellPadding: 1, textColor: COLORS.text, halign: "center" },
       headStyles: { fillColor: COLORS.accent, textColor: [255, 255, 255], fontStyle: "bold", fontSize: 5 },
       alternateRowStyles: { fillColor: COLORS.lightGray },
       columnStyles: {
